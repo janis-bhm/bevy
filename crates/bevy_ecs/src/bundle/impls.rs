@@ -4,7 +4,7 @@ use bevy_ptr::OwningPtr;
 use variadics_please::all_tuples;
 
 use crate::{
-    bundle::{Bundle, BundleEffect, BundleFromComponents, DynamicBundle, NoBundleEffect},
+    bundle::{BoxedBundle, Bundle, BundleEffect, BundleFromComponents, DynamicBundle, NoBundleEffect},
     component::{Component, ComponentId, Components, ComponentsRegistrator, StorageType},
     world::EntityWorldMut,
 };
@@ -42,6 +42,30 @@ impl<C: Component> DynamicBundle for C {
     #[inline]
     fn get_components(self, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) -> Self::Effect {
         OwningPtr::make(self, |ptr| func(C::STORAGE_TYPE, ptr));
+    }
+}
+
+impl<B: Bundle> BoxedBundle<B> {
+    pub fn new(bundle: B) -> Self {
+        Self(alloc::boxed::Box::new(bundle))
+    }
+}
+
+unsafe impl<B: Bundle> Bundle for BoxedBundle<B> {
+    fn component_ids(components: &mut ComponentsRegistrator, ids: &mut impl FnMut(ComponentId)) {
+        B::component_ids(components, ids)
+    }
+
+    fn get_component_ids(components: &Components, ids: &mut impl FnMut(Option<ComponentId>)) {
+        B::get_component_ids(components, ids)
+    }
+}
+
+impl<B: Bundle> DynamicBundle for BoxedBundle<B> {
+    type Effect = B::Effect;
+
+    fn get_components(self, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) -> Self::Effect {
+        self.0.get_components(func)
     }
 }
 

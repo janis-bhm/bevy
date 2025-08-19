@@ -25,6 +25,7 @@ use bevy::{
     ui::{Checked, InteractionDisabled},
     winit::WinitSettings,
 };
+use bevy_ecs::bundle::BoxedBundle;
 
 /// A struct to hold the state of various widgets shown in the demo.
 #[derive(Resource)]
@@ -123,7 +124,7 @@ fn demo_root(commands: &mut Commands) -> impl Bundle {
         },
     );
 
-    (
+    BoxedBundle::new((
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
@@ -149,7 +150,7 @@ fn demo_root(commands: &mut Commands) -> impl Bundle {
                 ..default()
             },
             children![
-                (
+                BoxedBundle::new((
                     Node {
                         display: Display::Flex,
                         flex_direction: FlexDirection::Row,
@@ -197,8 +198,8 @@ fn demo_root(commands: &mut Commands) -> impl Bundle {
                             Spawn((Text::new("Primary"), ThemedText))
                         ),
                     ]
-                ),
-                (
+                )),
+                BoxedBundle::new((
                     Node {
                         display: Display::Flex,
                         flex_direction: FlexDirection::Row,
@@ -248,7 +249,7 @@ fn demo_root(commands: &mut Commands) -> impl Bundle {
                             Spawn((Text::new("Right"), ThemedText))
                         ),
                     ]
-                ),
+                )),
                 button(
                     ButtonProps {
                         on_click: Callback::System(commands.register_system(|_: In<Activate>| {
@@ -414,7 +415,7 @@ fn demo_root(commands: &mut Commands) -> impl Bundle {
                 )
             ]
         ),],
-    )
+    ))
 }
 
 fn update_colors(

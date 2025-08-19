@@ -247,6 +247,12 @@ pub trait DynamicBundle {
     fn get_components(self, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) -> Self::Effect;
 }
 
+/// A "boxed" Bundle that can be used to avoid passing the bundle data on the stack.  If a
+/// Bundle is large enough to cause stack overflows, it can be wrapped with this
+/// using `BoxedBundle::new`.  Note that sub-bundles (for instance, children to be spawned)
+/// may still be passed on the stack at various points and may need to be wrapped in turn.
+pub struct BoxedBundle<B>(pub(crate) alloc::boxed::Box<B>);
+
 /// An operation on an [`Entity`](crate::entity::Entity) that occurs _after_ inserting the
 /// [`Bundle`] that defined this bundle effect.
 /// The order of operations is:

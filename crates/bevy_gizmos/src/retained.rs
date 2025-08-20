@@ -3,11 +3,10 @@
 use core::ops::{Deref, DerefMut};
 
 use bevy_asset::Handle;
-use bevy_ecs::{
-    component::{require, Component},
-    reflect::ReflectComponent,
-};
-use bevy_reflect::Reflect;
+#[cfg(feature = "bevy_render")]
+use bevy_camera::visibility::RenderLayers;
+use bevy_ecs::{component::Component, reflect::ReflectComponent};
+use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use bevy_transform::components::Transform;
 
 #[cfg(feature = "bevy_render")]
@@ -17,7 +16,7 @@ use {
         entity::Entity,
         system::{Commands, Local, Query},
     },
-    bevy_render::{view::RenderLayers, Extract},
+    bevy_render::Extract,
     bevy_transform::components::GlobalTransform,
 };
 
@@ -76,7 +75,7 @@ impl DerefMut for GizmoAsset {
 ///
 /// [`Gizmos`]: crate::gizmos::Gizmos
 #[derive(Component, Clone, Debug, Default, Reflect)]
-#[reflect(Component)]
+#[reflect(Component, Clone, Default)]
 #[require(Transform)]
 pub struct Gizmo {
     /// The handle to the gizmo to draw.
@@ -152,7 +151,7 @@ pub(crate) fn extract_linegizmos(
                 line_style: gizmo.line_config.style,
                 line_joints: gizmo.line_config.joints,
                 render_layers: render_layers.cloned().unwrap_or_default(),
-                handle: gizmo.handle.clone_weak(),
+                handle: gizmo.handle.clone(),
             },
             MainEntity::from(entity),
             TemporaryRenderEntity,

@@ -3,12 +3,10 @@
 //! and how to change the UV mapping at run-time.
 
 use bevy::{
+    asset::RenderAssetUsages,
+    mesh::{Indices, VertexAttributeValues},
     prelude::*,
-    render::{
-        mesh::{Indices, VertexAttributeValues},
-        render_asset::RenderAssetUsages,
-        render_resource::PrimitiveTopology,
-    },
+    render::render_resource::PrimitiveTopology,
 };
 
 // Define a "marker" component to mark the custom mesh. Marker components are often used in Bevy for
@@ -78,7 +76,7 @@ fn input_handler(
     time: Res<Time>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Space) {
-        let mesh_handle = mesh_query.get_single().expect("Query not successful");
+        let mesh_handle = mesh_query.single().expect("Query not successful");
         let mesh = meshes.get_mut(mesh_handle).unwrap();
         toggle_texture(mesh);
     }

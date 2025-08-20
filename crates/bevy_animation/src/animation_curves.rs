@@ -100,43 +100,48 @@ use bevy_math::curve::{
     iterable::IterableCurve,
     Curve, Interval,
 };
-use bevy_platform_support::hash::Hashed;
+use bevy_mesh::morph::MorphWeights;
+use bevy_platform::hash::Hashed;
 use bevy_reflect::{FromReflect, Reflect, Reflectable, TypeInfo, Typed};
-use bevy_render::mesh::morph::MorphWeights;
 use downcast_rs::{impl_downcast, Downcast};
 
-/// A value on a component that Bevy can animate.
+/// A trait for exposing a value in an entity so that it can be animated.
 ///
-/// You can implement this trait on a unit struct in order to support animating
-/// custom components other than transforms and morph weights. Use that type in
-/// conjunction with [`AnimatableCurve`] (and perhaps [`AnimatableKeyframeCurve`]
-/// to define the animation itself).
-/// For example, in order to animate field of view, you might use:
+/// `AnimatableProperty` allows any value contained in an entity to be animated
+/// as long as it can be obtained by mutable reference. This makes it more
+/// flexible than [`animated_field`].
+///
+/// [`animated_field`]: crate::animated_field
+///
+/// Here, `AnimatableProperty` is used to animate a value inside an `Option`,
+/// returning an error if the option is `None`.
 ///
 ///     # use bevy_animation::{prelude::AnimatableProperty, AnimationEntityMut, AnimationEvaluationError, animation_curves::EvaluatorId};
-///     # use bevy_reflect::Reflect;
+///     # use bevy_ecs::component::Component;
 ///     # use std::any::TypeId;
-///     # use bevy_render::camera::{Projection, PerspectiveProjection};
-///     #[derive(Reflect)]
-///     struct FieldOfViewProperty;
+///     #[derive(Component)]
+///     struct ExampleComponent {
+///         power_level: Option<f32>
+///     }
 ///
-///     impl AnimatableProperty for FieldOfViewProperty {
+///     #[derive(Clone)]
+///     struct PowerLevelProperty;
+///
+///     impl AnimatableProperty for PowerLevelProperty {
 ///         type Property = f32;
-///         fn get_mut<'a>(&self, entity: &'a mut AnimationEntityMut) -> Result<&'a mut Self::Property, AnimationEvaluationError> {
+///         fn get_mut<'a>(
+///             &self,
+///             entity: &'a mut AnimationEntityMut
+///         ) -> Result<&'a mut Self::Property, AnimationEvaluationError> {
 ///             let component = entity
-///                 .get_mut::<Projection>()
-///                 .ok_or(AnimationEvaluationError::ComponentNotPresent(TypeId::of::<
-///                     Projection,
-///                 >(
-///                 )))?
+///                 .get_mut::<ExampleComponent>()
+///                 .ok_or(AnimationEvaluationError::ComponentNotPresent(
+///                   TypeId::of::<ExampleComponent>()
+///                 ))?
 ///                 .into_inner();
-///             match component {
-///                 Projection::Perspective(perspective) => Ok(&mut perspective.fov),
-///                 _ => Err(AnimationEvaluationError::PropertyNotPresent(TypeId::of::<
-///                     PerspectiveProjection,
-///                 >(
-///                 ))),
-///             }
+///             component.power_level.as_mut().ok_or(AnimationEvaluationError::PropertyNotPresent(
+///                 TypeId::of::<Option<f32>>()
+///             ))
 ///         }
 ///
 ///         fn evaluator_id(&self) -> EvaluatorId {
@@ -144,58 +149,44 @@ use downcast_rs::{impl_downcast, Downcast};
 ///         }
 ///     }
 ///
-/// You can then create an [`AnimationClip`] to animate this property like so:
 ///
-///     # use bevy_animation::{AnimationClip, AnimationTargetId, VariableCurve, AnimationEntityMut, AnimationEvaluationError, animation_curves::EvaluatorId};
+/// You can then create an [`AnimatableCurve`] to animate this property like so:
+///
+///     # use bevy_animation::{VariableCurve, AnimationEntityMut, AnimationEvaluationError, animation_curves::EvaluatorId};
 ///     # use bevy_animation::prelude::{AnimatableProperty, AnimatableKeyframeCurve, AnimatableCurve};
-///     # use bevy_ecs::name::Name;
-///     # use bevy_reflect::Reflect;
-///     # use bevy_render::camera::{Projection, PerspectiveProjection};
+///     # use bevy_ecs::{name::Name, component::Component};
 ///     # use std::any::TypeId;
-///     # let animation_target_id = AnimationTargetId::from(&Name::new("Test"));
-///     # #[derive(Reflect, Clone)]
-///     # struct FieldOfViewProperty;
-///     # impl AnimatableProperty for FieldOfViewProperty {
-///     #    type Property = f32;
-///     #    fn get_mut<'a>(&self, entity: &'a mut AnimationEntityMut) -> Result<&'a mut Self::Property, AnimationEvaluationError> {
-///     #        let component = entity
-///     #            .get_mut::<Projection>()
-///     #            .ok_or(AnimationEvaluationError::ComponentNotPresent(TypeId::of::<
-///     #                Projection,
-///     #            >(
-///     #            )))?
-///     #            .into_inner();
-///     #        match component {
-///     #            Projection::Perspective(perspective) => Ok(&mut perspective.fov),
-///     #            _ => Err(AnimationEvaluationError::PropertyNotPresent(TypeId::of::<
-///     #                PerspectiveProjection,
-///     #            >(
-///     #            ))),
-///     #        }
-///     #    }
-///     #    fn evaluator_id(&self) -> EvaluatorId {
-///     #        EvaluatorId::Type(TypeId::of::<Self>())
-///     #    }
+///     # #[derive(Component)]
+///     # struct ExampleComponent { power_level: Option<f32> }
+///     # #[derive(Clone)]
+///     # struct PowerLevelProperty;
+///     # impl AnimatableProperty for PowerLevelProperty {
+///     #     type Property = f32;
+///     #     fn get_mut<'a>(
+///     #         &self,
+///     #         entity: &'a mut AnimationEntityMut
+///     #     ) -> Result<&'a mut Self::Property, AnimationEvaluationError> {
+///     #         let component = entity
+///     #             .get_mut::<ExampleComponent>()
+///     #             .ok_or(AnimationEvaluationError::ComponentNotPresent(
+///     #               TypeId::of::<ExampleComponent>()
+///     #             ))?
+///     #             .into_inner();
+///     #         component.power_level.as_mut().ok_or(AnimationEvaluationError::PropertyNotPresent(
+///     #             TypeId::of::<Option<f32>>()
+///     #         ))
+///     #     }
+///     #     fn evaluator_id(&self) -> EvaluatorId {
+///     #         EvaluatorId::Type(TypeId::of::<Self>())
+///     #     }
 ///     # }
-///     let mut animation_clip = AnimationClip::default();
-///     animation_clip.add_curve_to_target(
-///         animation_target_id,
-///         AnimatableCurve::new(
-///             FieldOfViewProperty,
-///             AnimatableKeyframeCurve::new([
-///                 (0.0, core::f32::consts::PI / 4.0),
-///                 (1.0, core::f32::consts::PI / 3.0),
-///             ]).expect("Failed to create font size curve")
-///         )
+///     AnimatableCurve::new(
+///         PowerLevelProperty,
+///         AnimatableKeyframeCurve::new([
+///             (0.0, 0.0),
+///             (1.0, 9001.0),
+///         ]).expect("Failed to create power level curve")
 ///     );
-///
-/// Here, the use of [`AnimatableKeyframeCurve`] creates a curve out of the given keyframe time-value
-/// pairs, using the [`Animatable`] implementation of `f32` to interpolate between them. The
-/// invocation of [`AnimatableCurve::new`] with `FieldOfViewProperty` indicates that the `f32`
-/// output from that curve is to be used to animate the font size of a `PerspectiveProjection` component (as
-/// configured above).
-///
-/// [`AnimationClip`]: crate::AnimationClip
 pub trait AnimatableProperty: Send + Sync + 'static {
     /// The animated property type.
     type Property: Animatable;
@@ -208,7 +199,7 @@ pub trait AnimatableProperty: Send + Sync + 'static {
 
     /// The [`EvaluatorId`] used to look up the [`AnimationCurveEvaluator`] for this [`AnimatableProperty`].
     /// For a given animated property, this ID should always be the same to allow things like animation blending to occur.
-    fn evaluator_id(&self) -> EvaluatorId;
+    fn evaluator_id(&self) -> EvaluatorId<'_>;
 }
 
 /// A [`Component`] field that can be animated, defined by a function that reads the component and returns
@@ -245,7 +236,7 @@ where
         Ok((self.func)(c.into_inner()))
     }
 
-    fn evaluator_id(&self) -> EvaluatorId {
+    fn evaluator_id(&self) -> EvaluatorId<'_> {
         EvaluatorId::ComponentField(&self.evaluator_id)
     }
 }
@@ -366,7 +357,7 @@ where
         self.curve.domain()
     }
 
-    fn evaluator_id(&self) -> EvaluatorId {
+    fn evaluator_id(&self) -> EvaluatorId<'_> {
         self.property.evaluator_id()
     }
 
@@ -417,10 +408,7 @@ impl<A: Animatable> AnimationCurveEvaluator for AnimatableCurveEvaluator<A> {
         self.evaluator.push_blend_register(weight, graph_node)
     }
 
-    fn commit<'a>(
-        &mut self,
-        mut entity: AnimationEntityMut<'a>,
-    ) -> Result<(), AnimationEvaluationError> {
+    fn commit(&mut self, mut entity: AnimationEntityMut) -> Result<(), AnimationEvaluationError> {
         let property = self.property.get_mut(&mut entity)?;
         *property = self
             .evaluator
@@ -488,7 +476,7 @@ where
         self.0.domain()
     }
 
-    fn evaluator_id(&self) -> EvaluatorId {
+    fn evaluator_id(&self) -> EvaluatorId<'_> {
         EvaluatorId::Type(TypeId::of::<WeightsCurveEvaluator>())
     }
 
@@ -605,10 +593,7 @@ impl AnimationCurveEvaluator for WeightsCurveEvaluator {
         Ok(())
     }
 
-    fn commit<'a>(
-        &mut self,
-        mut entity: AnimationEntityMut<'a>,
-    ) -> Result<(), AnimationEvaluationError> {
+    fn commit(&mut self, mut entity: AnimationEntityMut) -> Result<(), AnimationEvaluationError> {
         if self.stack_morph_target_weights.is_empty() {
             return Ok(());
         }
@@ -783,7 +768,7 @@ pub trait AnimationCurve: Debug + Send + Sync + 'static {
     ///
     /// This must match the type returned by [`Self::create_evaluator`]. It must
     /// be a single type that doesn't depend on the type of the curve.
-    fn evaluator_id(&self) -> EvaluatorId;
+    fn evaluator_id(&self) -> EvaluatorId<'_>;
 
     /// Returns a newly-instantiated [`AnimationCurveEvaluator`] for use with
     /// this curve.
@@ -914,10 +899,7 @@ pub trait AnimationCurveEvaluator: Downcast + Send + Sync + 'static {
     ///
     /// The property on the component must be overwritten with the value from
     /// the stack, not blended with it.
-    fn commit<'a>(
-        &mut self,
-        entity: AnimationEntityMut<'a>,
-    ) -> Result<(), AnimationEvaluationError>;
+    fn commit(&mut self, entity: AnimationEntityMut) -> Result<(), AnimationEvaluationError>;
 }
 
 impl_downcast!(AnimationCurveEvaluator);

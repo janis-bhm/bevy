@@ -10,16 +10,16 @@ use alloc::{
 pub use bevy_derive::AppLabel;
 use bevy_ecs::{
     component::RequiredComponentsError,
+    error::{DefaultErrorHandler, ErrorHandler},
     event::{event_update_system, EventCursor},
     intern::Interned,
     prelude::*,
-    schedule::{ScheduleBuildSettings, ScheduleLabel},
-    system::{IntoObserverSystem, SystemId, SystemInput},
+    schedule::{InternedSystemSet, ScheduleBuildSettings, ScheduleLabel},
+    system::{IntoObserverSystem, ScheduleSystem, SystemId, SystemInput},
 };
-use bevy_platform_support::collections::HashMap;
+use bevy_platform::collections::HashMap;
 use core::{fmt::Debug, num::NonZero, panic::AssertUnwindSafe};
 use log::debug;
-use thiserror::Error;
 
 #[cfg(feature = "trace")]
 use tracing::info_span;
@@ -44,7 +44,7 @@ pub use bevy_ecs::label::DynEq;
 /// A shorthand for `Interned<dyn AppLabel>`.
 pub type InternedAppLabel = Interned<dyn AppLabel>;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum AppError {
     #[error("duplicate plugin {plugin_name:?}")]
     DuplicatePlugin { plugin_name: String },
@@ -86,6 +86,7 @@ pub struct App {
     /// [`WinitPlugin`]: https://docs.rs/bevy/latest/bevy/winit/struct.WinitPlugin.html
     /// [`ScheduleRunnerPlugin`]: https://docs.rs/bevy/latest/bevy/app/struct.ScheduleRunnerPlugin.html
     pub(crate) runner: RunnerFn,
+    default_error_handler: Option<ErrorHandler>,
 }
 
 impl Debug for App {
@@ -105,10 +106,11 @@ impl Default for App {
 
         #[cfg(feature = "bevy_reflect")]
         {
+            #[cfg(not(feature = "reflect_auto_register"))]
             app.init_resource::<AppTypeRegistry>();
-            app.register_type::<Name>();
-            app.register_type::<ChildOf>();
-            app.register_type::<Children>();
+
+            #[cfg(feature = "reflect_auto_register")]
+            app.insert_resource(AppTypeRegistry::new_with_derived_types());
         }
 
         #[cfg(feature = "reflect_functions")]
@@ -118,7 +120,7 @@ impl Default for App {
         app.add_systems(
             First,
             event_update_system
-                .in_set(bevy_ecs::event::EventUpdates)
+                .in_set(bevy_ecs::event::EventUpdateSystems)
                 .run_if(bevy_ecs::event::event_update_condition),
         );
         app.add_event::<AppExit>();
@@ -144,6 +146,7 @@ impl App {
                 sub_apps: HashMap::default(),
             },
             runner: Box::new(run_once),
+            default_error_handler: None,
         }
     }
 
@@ -253,13 +256,14 @@ impl App {
     /// plugins are ready, but can be useful for situations where you want to use [`App::update`].
     pub fn finish(&mut self) {
         // plugins installed to main should see all sub-apps
-        let plugins = core::mem::take(&mut self.main_mut().plugin_registry);
-        for plugin in &plugins {
-            plugin.finish(self);
+        // do hokey pokey with a boxed zst plugin (doesn't allocate)
+        let mut hokeypokey: Box<dyn Plugin> = Box::new(HokeyPokey);
+        for i in 0..self.main().plugin_registry.len() {
+            core::mem::swap(&mut self.main_mut().plugin_registry[i], &mut hokeypokey);
+            hokeypokey.finish(self);
+            core::mem::swap(&mut self.main_mut().plugin_registry[i], &mut hokeypokey);
         }
-        let main = self.main_mut();
-        main.plugin_registry = plugins;
-        main.plugins_state = PluginsState::Finished;
+        self.main_mut().plugins_state = PluginsState::Finished;
         self.sub_apps.iter_mut().skip(1).for_each(SubApp::finish);
     }
 
@@ -267,13 +271,14 @@ impl App {
     /// [`App::finish`], but can be useful for situations where you want to use [`App::update`].
     pub fn cleanup(&mut self) {
         // plugins installed to main should see all sub-apps
-        let plugins = core::mem::take(&mut self.main_mut().plugin_registry);
-        for plugin in &plugins {
-            plugin.cleanup(self);
+        // do hokey pokey with a boxed zst plugin (doesn't allocate)
+        let mut hokeypokey: Box<dyn Plugin> = Box::new(HokeyPokey);
+        for i in 0..self.main().plugin_registry.len() {
+            core::mem::swap(&mut self.main_mut().plugin_registry[i], &mut hokeypokey);
+            hokeypokey.cleanup(self);
+            core::mem::swap(&mut self.main_mut().plugin_registry[i], &mut hokeypokey);
         }
-        let main = self.main_mut();
-        main.plugin_registry = plugins;
-        main.plugins_state = PluginsState::Cleaned;
+        self.main_mut().plugins_state = PluginsState::Cleaned;
         self.sub_apps.iter_mut().skip(1).for_each(SubApp::cleanup);
     }
 
@@ -302,7 +307,7 @@ impl App {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoSystemConfigs<M>,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
     ) -> &mut Self {
         self.main_mut().add_systems(schedule, systems);
         self
@@ -330,16 +335,16 @@ impl App {
 
     /// Configures a collection of system sets in the provided schedule, adding any sets that do not exist.
     #[track_caller]
-    pub fn configure_sets(
+    pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoSystemSetConfigs,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
     ) -> &mut Self {
         self.main_mut().configure_sets(schedule, sets);
         self
     }
 
-    /// Initializes `T` event handling by inserting an event queue resource ([`Events::<T>`])
+    /// Initializes [`BufferedEvent`] handling for `T` by inserting an event queue resource ([`Events::<T>`])
     /// and scheduling an [`event_update_system`] in [`First`].
     ///
     /// See [`Events`] for information on how to define events.
@@ -350,7 +355,7 @@ impl App {
     /// # use bevy_app::prelude::*;
     /// # use bevy_ecs::prelude::*;
     /// #
-    /// # #[derive(Event)]
+    /// # #[derive(BufferedEvent)]
     /// # struct MyEvent;
     /// # let mut app = App::new();
     /// #
@@ -358,7 +363,7 @@ impl App {
     /// ```
     pub fn add_event<T>(&mut self) -> &mut Self
     where
-        T: Event,
+        T: BufferedEvent,
     {
         self.main_mut().add_event::<T>();
         self
@@ -1034,6 +1039,17 @@ impl App {
             .try_register_required_components_with::<T, R>(constructor)
     }
 
+    /// Registers a component type as "disabling",
+    /// using [default query filters](bevy_ecs::entity_disabling::DefaultQueryFilters) to exclude entities with the component from queries.
+    ///
+    /// # Warning
+    ///
+    /// As discussed in the [module docs](bevy_ecs::entity_disabling), this can have performance implications,
+    /// as well as create interoperability issues, and should be used with caution.
+    pub fn register_disabling_component<C: Component>(&mut self) {
+        self.world_mut().register_disabling_component::<C>();
+    }
+
     /// Returns a reference to the main [`SubApp`]'s [`World`]. This is the same as calling
     /// [`app.main().world()`].
     ///
@@ -1105,7 +1121,12 @@ impl App {
     }
 
     /// Inserts a [`SubApp`] with the given label.
-    pub fn insert_sub_app(&mut self, label: impl AppLabel, sub_app: SubApp) {
+    pub fn insert_sub_app(&mut self, label: impl AppLabel, mut sub_app: SubApp) {
+        if let Some(handler) = self.default_error_handler {
+            sub_app
+                .world_mut()
+                .get_resource_or_insert_with(|| DefaultErrorHandler(handler));
+        }
         self.sub_apps.sub_apps.insert(label.intern(), sub_app);
     }
 
@@ -1288,6 +1309,8 @@ impl App {
 
     /// Spawns an [`Observer`] entity, which will watch for and respond to the given event.
     ///
+    /// `observer` can be any system whose first parameter is [`On`].
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -1302,14 +1325,14 @@ impl App {
     /// #   friends_allowed: bool,
     /// # };
     /// #
-    /// # #[derive(Event)]
+    /// # #[derive(EntityEvent)]
     /// # struct Invite;
     /// #
     /// # #[derive(Component)]
     /// # struct Friend;
     /// #
-    /// // An observer system can be any system where the first parameter is a trigger
-    /// app.add_observer(|trigger: Trigger<Party>, friends: Query<Entity, With<Friend>>, mut commands: Commands| {
+    ///
+    /// app.add_observer(|trigger: On<Party>, friends: Query<Entity, With<Friend>>, mut commands: Commands| {
     ///     if trigger.event().friends_allowed {
     ///         for friend in friends.iter() {
     ///             commands.trigger_targets(Invite, friend);
@@ -1324,13 +1347,62 @@ impl App {
         self.world_mut().add_observer(observer);
         self
     }
+
+    /// Gets the error handler to set for new supapps.
+    ///
+    /// Note that the error handler of existing subapps may differ.
+    pub fn get_error_handler(&self) -> Option<ErrorHandler> {
+        self.default_error_handler
+    }
+
+    /// Set the [default error handler] for the all subapps (including the main one and future ones)
+    /// that do not have one.
+    ///
+    /// May only be called once and should be set by the application, not by libraries.
+    ///
+    /// The handler will be called when an error is produced and not otherwise handled.
+    ///
+    /// # Panics
+    /// Panics if called multiple times.
+    ///
+    /// # Example
+    /// ```
+    /// # use bevy_app::*;
+    /// # use bevy_ecs::error::warn;
+    /// # fn MyPlugins(_: &mut App) {}
+    /// App::new()
+    ///     .set_error_handler(warn)
+    ///     .add_plugins(MyPlugins)
+    ///     .run();
+    /// ```
+    ///
+    /// [default error handler]: bevy_ecs::error::DefaultErrorHandler
+    pub fn set_error_handler(&mut self, handler: ErrorHandler) -> &mut Self {
+        assert!(
+            self.default_error_handler.is_none(),
+            "`set_error_handler` called multiple times on same `App`"
+        );
+        self.default_error_handler = Some(handler);
+        for sub_app in self.sub_apps.iter_mut() {
+            sub_app
+                .world_mut()
+                .get_resource_or_insert_with(|| DefaultErrorHandler(handler));
+        }
+        self
+    }
+}
+
+// Used for doing hokey pokey in finish and cleanup
+pub(crate) struct HokeyPokey;
+impl Plugin for HokeyPokey {
+    fn build(&self, _: &mut App) {}
 }
 
 type RunnerFn = Box<dyn FnOnce(App) -> AppExit>;
 
 fn run_once(mut app: App) -> AppExit {
     while app.plugins_state() == PluginsState::Adding {
-        #[cfg(all(not(target_arch = "wasm32"), feature = "bevy_tasks"))]
+        #[cfg(not(all(target_arch = "wasm32", feature = "web")))]
         bevy_tasks::tick_global_task_pools_on_main_thread();
     }
     app.finish();
@@ -1341,7 +1413,7 @@ fn run_once(mut app: App) -> AppExit {
     app.should_exit().unwrap_or(AppExit::Success)
 }
 
-/// An event that indicates the [`App`] should exit. If one or more of these are present at the end of an update,
+/// A [`BufferedEvent`] that indicates the [`App`] should exit. If one or more of these are present at the end of an update,
 /// the [runner](App::set_runner) will end and ([maybe](App::run)) return control to the caller.
 ///
 /// This event can be used to detect when an exit is requested. Make sure that systems listening
@@ -1351,7 +1423,7 @@ fn run_once(mut app: App) -> AppExit {
 /// This type is roughly meant to map to a standard definition of a process exit code (0 means success, not 0 means error). Due to portability concerns
 /// (see [`ExitCode`](https://doc.rust-lang.org/std/process/struct.ExitCode.html) and [`process::exit`](https://doc.rust-lang.org/std/process/fn.exit.html#))
 /// we only allow error codes between 1 and [255](u8::MAX).
-#[derive(Event, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(BufferedEvent, Debug, Clone, Default, PartialEq, Eq)]
 pub enum AppExit {
     /// [`App`] exited without any problems.
     #[default]
@@ -1394,7 +1466,6 @@ impl AppExit {
 }
 
 impl From<u8> for AppExit {
-    #[must_use]
     fn from(value: u8) -> Self {
         Self::from_code(value)
     }
@@ -1413,18 +1484,18 @@ impl Termination for AppExit {
 
 #[cfg(test)]
 mod tests {
-    use core::{iter, marker::PhantomData};
+    use core::marker::PhantomData;
     use std::sync::Mutex;
 
     use bevy_ecs::{
         change_detection::{DetectChanges, ResMut},
         component::Component,
         entity::Entity,
-        event::{Event, EventWriter, Events},
+        event::{BufferedEvent, EventWriter, Events},
+        lifecycle::RemovedComponents,
         query::With,
-        removal_detection::RemovedComponents,
         resource::Resource,
-        schedule::{IntoSystemConfigs, ScheduleLabel},
+        schedule::{IntoScheduleConfigs, ScheduleLabel},
         system::{Commands, Query},
         world::{FromWorld, World},
     };
@@ -1460,6 +1531,38 @@ mod tests {
             if app.is_plugin_added::<PluginA>() {
                 panic!("cannot run if PluginA is already registered");
             }
+        }
+    }
+
+    struct PluginF;
+
+    impl Plugin for PluginF {
+        fn build(&self, _app: &mut App) {}
+
+        fn finish(&self, app: &mut App) {
+            // Ensure other plugins are available during finish
+            assert_eq!(
+                app.is_plugin_added::<PluginA>(),
+                !app.get_added_plugins::<PluginA>().is_empty(),
+            );
+        }
+
+        fn cleanup(&self, app: &mut App) {
+            // Ensure other plugins are available during finish
+            assert_eq!(
+                app.is_plugin_added::<PluginA>(),
+                !app.get_added_plugins::<PluginA>().is_empty(),
+            );
+        }
+    }
+
+    struct PluginG;
+
+    impl Plugin for PluginG {
+        fn build(&self, _app: &mut App) {}
+
+        fn finish(&self, app: &mut App) {
+            app.add_plugins(PluginB);
         }
     }
 
@@ -1503,12 +1606,15 @@ mod tests {
     #[derive(ScheduleLabel, Hash, Clone, PartialEq, Eq, Debug)]
     struct EnterMainMenu;
 
+    #[derive(Component)]
+    struct A;
+
     fn bar(mut commands: Commands) {
-        commands.spawn_empty();
+        commands.spawn(A);
     }
 
     fn foo(mut commands: Commands) {
-        commands.spawn_empty();
+        commands.spawn(A);
     }
 
     #[test]
@@ -1517,7 +1623,7 @@ mod tests {
         app.add_systems(EnterMainMenu, (foo, bar));
 
         app.world_mut().run_schedule(EnterMainMenu);
-        assert_eq!(app.world().entities().len(), 2);
+        assert_eq!(app.world_mut().query::<&A>().query(app.world()).count(), 2);
     }
 
     #[test]
@@ -1530,9 +1636,41 @@ mod tests {
     }
 
     #[test]
+    fn test_get_added_plugins_works_during_finish_and_cleanup() {
+        let mut app = App::new();
+        app.add_plugins(PluginA);
+        app.add_plugins(PluginF);
+        app.finish();
+    }
+
+    #[test]
+    fn test_adding_plugin_works_during_finish() {
+        let mut app = App::new();
+        app.add_plugins(PluginA);
+        app.add_plugins(PluginG);
+        app.finish();
+        assert_eq!(
+            app.main().plugin_registry[0].name(),
+            "bevy_app::main_schedule::MainSchedulePlugin"
+        );
+        assert_eq!(
+            app.main().plugin_registry[1].name(),
+            "bevy_app::app::tests::PluginA"
+        );
+        assert_eq!(
+            app.main().plugin_registry[2].name(),
+            "bevy_app::app::tests::PluginG"
+        );
+        // PluginG adds PluginB during finish
+        assert_eq!(
+            app.main().plugin_registry[3].name(),
+            "bevy_app::app::tests::PluginB"
+        );
+    }
+
+    #[test]
     fn test_derive_app_label() {
         use super::AppLabel;
-        use crate::{self as bevy_app};
 
         #[derive(AppLabel, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
         struct UnitLabel;
@@ -1638,7 +1776,7 @@ mod tests {
         struct Foo;
 
         let mut app = App::new();
-        app.world_mut().spawn_batch(iter::repeat(Foo).take(5));
+        app.world_mut().spawn_batch(core::iter::repeat_n(Foo, 5));
 
         fn despawn_one_foo(mut commands: Commands, foos: Query<Entity, With<Foo>>) {
             if let Some(e) = foos.iter().next() {
@@ -1664,7 +1802,6 @@ mod tests {
     #[test]
     fn test_extract_sees_changes() {
         use super::AppLabel;
-        use crate::{self as bevy_app};
 
         #[derive(AppLabel, Clone, Copy, Hash, PartialEq, Eq, Debug)]
         struct MySubApp;
@@ -1693,9 +1830,9 @@ mod tests {
         fn raise_exits(mut exits: EventWriter<AppExit>) {
             // Exit codes chosen by a fair dice roll.
             // Unlikely to overlap with default values.
-            exits.send(AppExit::Success);
-            exits.send(AppExit::from_code(4));
-            exits.send(AppExit::from_code(73));
+            exits.write(AppExit::Success);
+            exits.write(AppExit::from_code(4));
+            exits.write(AppExit::from_code(73));
         }
 
         let exit = App::new().add_systems(Update, raise_exits).run();
@@ -1788,7 +1925,7 @@ mod tests {
     }
     #[test]
     fn events_should_be_updated_once_per_update() {
-        #[derive(Event, Clone)]
+        #[derive(BufferedEvent, Clone)]
         struct TestEvent;
 
         let mut app = App::new();
@@ -1801,7 +1938,7 @@ mod tests {
         app.update();
 
         // Sending one event
-        app.world_mut().send_event(TestEvent);
+        app.world_mut().write_event(TestEvent);
 
         let test_events = app.world().resource::<Events<TestEvent>>();
         assert_eq!(test_events.len(), 1);
@@ -1809,8 +1946,8 @@ mod tests {
         app.update();
 
         // Sending two events on the next frame
-        app.world_mut().send_event(TestEvent);
-        app.world_mut().send_event(TestEvent);
+        app.world_mut().write_event(TestEvent);
+        app.world_mut().write_event(TestEvent);
 
         let test_events = app.world().resource::<Events<TestEvent>>();
         assert_eq!(test_events.len(), 3); // Events are double-buffered, so we see 1 + 2 = 3

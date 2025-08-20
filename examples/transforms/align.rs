@@ -75,8 +75,8 @@ fn setup(
     ));
 
     // Initialize random axes
-    let first = seeded_rng.gen();
-    let second = seeded_rng.gen();
+    let first = seeded_rng.random();
+    let second = seeded_rng.random();
     commands.spawn(RandomAxes(first, second));
 
     // Finally, our ship that is going to rotate
@@ -165,8 +165,8 @@ fn handle_keypress(
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
         // Randomize the target axes
-        let first = seeded_rng.0.gen();
-        let second = seeded_rng.0.gen();
+        let first = seeded_rng.0.random();
+        let second = seeded_rng.0.random();
         **random_axes = RandomAxes(first, second);
 
         // Stop the ship and set it up to transform from its present orientation to the new one

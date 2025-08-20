@@ -38,8 +38,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             font_size: 67.0,
             ..default()
         },
+        TextShadow::default(),
         // Set the justification of the Text
-        TextLayout::new_with_justify(JustifyText::Center),
+        TextLayout::new_with_justify(Justify::Center),
         // Set the style of the Node itself.
         Node {
             position_type: PositionType::Absolute,
@@ -134,11 +135,11 @@ fn text_update_system(
     mut query: Query<&mut TextSpan, With<FpsText>>,
 ) {
     for mut span in &mut query {
-        if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
-            if let Some(value) = fps.smoothed() {
-                // Update the value of the second section
-                **span = format!("{value:.2}");
-            }
+        if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS)
+            && let Some(value) = fps.smoothed()
+        {
+            // Update the value of the second section
+            **span = format!("{value:.2}");
         }
     }
 }

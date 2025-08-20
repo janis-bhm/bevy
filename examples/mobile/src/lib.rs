@@ -5,13 +5,15 @@ use bevy::{
     input::{gestures::RotationGesture, touch::TouchPhase},
     log::{Level, LogPlugin},
     prelude::*,
-    window::{AppLifecycle, WindowMode},
+    window::{AppLifecycle, ScreenEdge, WindowMode},
     winit::WinitSettings,
 };
 
-// the `bevy_main` proc_macro generates the required boilerplate for iOS and Android
+// the `bevy_main` proc_macro generates the required boilerplate for Android
 #[bevy_main]
-fn main() {
+/// The entry point for the application. Is `pub` so that it can be used from
+/// `main.rs`.
+pub fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -32,6 +34,8 @@ fn main() {
                     prefers_home_indicator_hidden: true,
                     // Only has an effect on iOS
                     prefers_status_bar_hidden: true,
+                    // Only has an effect on iOS
+                    preferred_screen_edges_deferring_system_gestures: ScreenEdge::Bottom,
                     ..default()
                 }),
                 ..default()
@@ -41,7 +45,16 @@ fn main() {
     // This can help reduce cpu usage on mobile devices
     .insert_resource(WinitSettings::mobile())
     .add_systems(Startup, (setup_scene, setup_music))
-    .add_systems(Update, (touch_camera, button_handler, handle_lifetime))
+    .add_systems(
+        Update,
+        (
+            touch_camera,
+            button_handler,
+            // Only run the lifetime handler when an [`AudioSink`] component exists in the world.
+            // This ensures we don't try to manage audio that hasn't been initialized yet.
+            handle_lifetime.run_if(any_with_component::<AudioSink>),
+        ),
+    )
     .run();
 }
 
@@ -52,7 +65,7 @@ fn touch_camera(
     mut last_position: Local<Option<Vec2>>,
     mut rotations: EventReader<RotationGesture>,
 ) {
-    let Ok(window) = window.get_single() else {
+    let Ok(window) = window.single() else {
         return;
     };
 
@@ -145,7 +158,7 @@ fn setup_scene(
                 ..default()
             },
             TextColor::BLACK,
-            TextLayout::new_with_justify(JustifyText::Center),
+            TextLayout::new_with_justify(Justify::Center),
         ));
 }
 

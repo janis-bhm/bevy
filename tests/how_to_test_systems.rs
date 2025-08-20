@@ -7,7 +7,7 @@ struct Enemy {
     score_value: u32,
 }
 
-#[derive(Event)]
+#[derive(BufferedEvent)]
 struct EnemyDied(u32);
 
 #[derive(Resource)]
@@ -27,7 +27,7 @@ fn despawn_dead_enemies(
     for (entity, enemy) in &enemies {
         if enemy.hit_points == 0 {
             commands.entity(entity).despawn();
-            dead_enemies.send(EnemyDied(enemy.score_value));
+            dead_enemies.write(EnemyDied(enemy.score_value));
         }
     }
 }
@@ -161,10 +161,10 @@ fn update_score_on_event() {
     // Add our systems
     app.add_systems(Update, update_score);
 
-    // Send an `EnemyDied` event
+    // Write an `EnemyDied` event
     app.world_mut()
         .resource_mut::<Events<EnemyDied>>()
-        .send(EnemyDied(3));
+        .write(EnemyDied(3));
 
     // Run systems
     app.update();

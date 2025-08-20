@@ -197,33 +197,6 @@ const SEGMENT_3D: Segment3d = Segment3d {
     ],
 };
 
-const POLYLINE_2D: Polyline2d<4> = Polyline2d {
-    vertices: [
-        Vec2::new(-BIG_2D, -SMALL_2D),
-        Vec2::new(-SMALL_2D, SMALL_2D),
-        Vec2::new(SMALL_2D, -SMALL_2D),
-        Vec2::new(BIG_2D, SMALL_2D),
-    ],
-};
-const POLYLINE_3D: Polyline3d<4> = Polyline3d {
-    vertices: [
-        Vec3::new(-BIG_3D, -SMALL_3D, -SMALL_3D),
-        Vec3::new(SMALL_3D, SMALL_3D, 0.0),
-        Vec3::new(-SMALL_3D, -SMALL_3D, 0.0),
-        Vec3::new(BIG_3D, SMALL_3D, SMALL_3D),
-    ],
-};
-
-const POLYGON_2D: Polygon<5> = Polygon {
-    vertices: [
-        Vec2::new(-BIG_2D, -SMALL_2D),
-        Vec2::new(BIG_2D, -SMALL_2D),
-        Vec2::new(BIG_2D, SMALL_2D),
-        Vec2::new(0.0, 0.0),
-        Vec2::new(-BIG_2D, SMALL_2D),
-    ],
-};
-
 const REGULAR_POLYGON: RegularPolygon = RegularPolygon {
     circumcircle: Circle { radius: BIG_2D },
     sides: 5,
@@ -368,39 +341,31 @@ fn setup_text(mut commands: Commands, cameras: Query<(Entity, &Camera)>) {
         .iter()
         .find_map(|(entity, camera)| camera.is_active.then_some(entity))
         .expect("run condition ensures existence");
-    commands
-        .spawn((
-            HeaderNode,
-            Node {
-                justify_self: JustifySelf::Center,
-                top: Val::Px(5.0),
-                ..Default::default()
-            },
-            UiTargetCamera(active_camera),
-        ))
-        .with_children(|p| {
-            p.spawn((
-                Text::default(),
-                HeaderText,
-                TextLayout::new_with_justify(JustifyText::Center),
-            ))
-            .with_children(|p| {
-                p.spawn(TextSpan::new("Primitive: "));
-                p.spawn(TextSpan(format!(
-                    "{text}",
-                    text = PrimitiveSelected::default()
-                )));
-                p.spawn(TextSpan::new("\n\n"));
-                p.spawn(TextSpan::new(
+    commands.spawn((
+        HeaderNode,
+        Node {
+            justify_self: JustifySelf::Center,
+            top: Val::Px(5.0),
+            ..Default::default()
+        },
+        UiTargetCamera(active_camera),
+        children![(
+            Text::default(),
+            HeaderText,
+            TextLayout::new_with_justify(Justify::Center),
+            children![
+                TextSpan::new("Primitive: "),
+                TextSpan(format!("{text}", text = PrimitiveSelected::default())),
+                TextSpan::new("\n\n"),
+                TextSpan::new(
                     "Press 'C' to switch between 2D and 3D mode\n\
                     Press 'Up' or 'Down' to switch to the next/previous primitive",
-                ));
-                p.spawn(TextSpan::new("\n\n"));
-                p.spawn(TextSpan::new(
-                    "(If nothing is displayed, there's no rendering support yet)",
-                ));
-            });
-        });
+                ),
+                TextSpan::new("\n\n"),
+                TextSpan::new("(If nothing is displayed, there's no rendering support yet)",),
+            ]
+        )],
+    ));
 }
 
 fn update_text(
@@ -460,8 +425,31 @@ fn draw_gizmos_2d(mut gizmos: Gizmos, state: Res<State<PrimitiveSelected>>, time
         PrimitiveSelected::Segment => {
             drop(gizmos.primitive_2d(&SEGMENT_2D, isometry, color));
         }
-        PrimitiveSelected::Polyline => gizmos.primitive_2d(&POLYLINE_2D, isometry, color),
-        PrimitiveSelected::Polygon => gizmos.primitive_2d(&POLYGON_2D, isometry, color),
+        PrimitiveSelected::Polyline => gizmos.primitive_2d(
+            &Polyline2d {
+                vertices: vec![
+                    Vec2::new(-BIG_2D, -SMALL_2D),
+                    Vec2::new(-SMALL_2D, SMALL_2D),
+                    Vec2::new(SMALL_2D, -SMALL_2D),
+                    Vec2::new(BIG_2D, SMALL_2D),
+                ],
+            },
+            isometry,
+            color,
+        ),
+        PrimitiveSelected::Polygon => gizmos.primitive_2d(
+            &Polygon {
+                vertices: vec![
+                    Vec2::new(-BIG_2D, -SMALL_2D),
+                    Vec2::new(BIG_2D, -SMALL_2D),
+                    Vec2::new(BIG_2D, SMALL_2D),
+                    Vec2::new(0.0, 0.0),
+                    Vec2::new(-BIG_2D, SMALL_2D),
+                ],
+            },
+            isometry,
+            color,
+        ),
         PrimitiveSelected::RegularPolygon => {
             gizmos.primitive_2d(&REGULAR_POLYGON, isometry, color);
         }
@@ -675,7 +663,18 @@ fn draw_gizmos_3d(mut gizmos: Gizmos, state: Res<State<PrimitiveSelected>>, time
         PrimitiveSelected::Plane => drop(gizmos.primitive_3d(&PLANE_3D, isometry, color)),
         PrimitiveSelected::Line => gizmos.primitive_3d(&LINE3D, isometry, color),
         PrimitiveSelected::Segment => gizmos.primitive_3d(&SEGMENT_3D, isometry, color),
-        PrimitiveSelected::Polyline => gizmos.primitive_3d(&POLYLINE_3D, isometry, color),
+        PrimitiveSelected::Polyline => gizmos.primitive_3d(
+            &Polyline3d {
+                vertices: vec![
+                    Vec3::new(-BIG_3D, -SMALL_3D, -SMALL_3D),
+                    Vec3::new(SMALL_3D, SMALL_3D, 0.0),
+                    Vec3::new(-SMALL_3D, -SMALL_3D, 0.0),
+                    Vec3::new(BIG_3D, SMALL_3D, SMALL_3D),
+                ],
+            },
+            isometry,
+            color,
+        ),
         PrimitiveSelected::Polygon => {}
         PrimitiveSelected::RegularPolygon => {}
         PrimitiveSelected::Capsule => drop(

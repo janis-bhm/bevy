@@ -1,18 +1,21 @@
-use alloc::{vec, vec::Vec};
-use core::fmt::Debug;
+use alloc::{boxed::Box, vec, vec::Vec};
+use core::{
+    any::{Any, TypeId},
+    fmt::Debug,
+};
 use smallvec::SmallVec;
 
-use bevy_platform_support::collections::{HashMap, HashSet};
+use bevy_platform::collections::{HashMap, HashSet};
+use bevy_utils::TypeIdMap;
+
 use fixedbitset::FixedBitSet;
 
 use crate::schedule::set::*;
 
 mod graph_map;
-mod node;
 mod tarjan_scc;
 
-pub use graph_map::{DiGraph, Direction, UnGraph};
-pub use node::NodeId;
+pub use graph_map::{DiGraph, Direction, GraphNodeId, UnGraph};
 
 /// Specifies what kind of edge should be added to the dependency graph.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -21,22 +24,26 @@ pub(crate) enum DependencyKind {
     Before,
     /// A node that should be succeeded.
     After,
-    /// A node that should be preceded and will **not** automatically insert an instance of `ApplyDeferred` on the edge.
-    BeforeNoSync,
-    /// A node that should be succeeded and will **not** automatically insert an instance of `ApplyDeferred` on the edge.
-    AfterNoSync,
 }
 
 /// An edge to be added to the dependency graph.
-#[derive(Clone)]
 pub(crate) struct Dependency {
     pub(crate) kind: DependencyKind,
     pub(crate) set: InternedSystemSet,
+    pub(crate) options: TypeIdMap<Box<dyn Any>>,
 }
 
 impl Dependency {
     pub fn new(kind: DependencyKind, set: InternedSystemSet) -> Self {
-        Self { kind, set }
+        Self {
+            kind,
+            set,
+            options: Default::default(),
+        }
+    }
+    pub fn add_config<T: 'static>(mut self, option: T) -> Self {
+        self.options.insert(TypeId::of::<T>(), Box::new(option));
+        self
     }
 }
 
@@ -52,8 +59,8 @@ pub(crate) enum Ambiguity {
 }
 
 /// Metadata about how the node fits in the schedule graph
-#[derive(Clone, Default)]
-pub(crate) struct GraphInfo {
+#[derive(Default)]
+pub struct GraphInfo {
     /// the sets that the node belongs to (hierarchy)
     pub(crate) hierarchy: Vec<InternedSystemSet>,
     /// the sets that the node depends on (must run before or after)
@@ -73,24 +80,24 @@ pub(crate) fn row_col(index: usize, num_cols: usize) -> (usize, usize) {
 }
 
 /// Stores the results of the graph analysis.
-pub(crate) struct CheckGraphResults {
+pub(crate) struct CheckGraphResults<N: GraphNodeId> {
     /// Boolean reachability matrix for the graph.
     pub(crate) reachable: FixedBitSet,
     /// Pairs of nodes that have a path connecting them.
-    pub(crate) connected: HashSet<(NodeId, NodeId)>,
+    pub(crate) connected: HashSet<(N, N)>,
     /// Pairs of nodes that don't have a path connecting them.
-    pub(crate) disconnected: Vec<(NodeId, NodeId)>,
+    pub(crate) disconnected: Vec<(N, N)>,
     /// Edges that are redundant because a longer path exists.
-    pub(crate) transitive_edges: Vec<(NodeId, NodeId)>,
+    pub(crate) transitive_edges: Vec<(N, N)>,
     /// Variant of the graph with no transitive edges.
-    pub(crate) transitive_reduction: DiGraph,
+    pub(crate) transitive_reduction: DiGraph<N>,
     /// Variant of the graph with all possible transitive edges.
     // TODO: this will very likely be used by "if-needed" ordering
     #[expect(dead_code, reason = "See the TODO above this attribute.")]
-    pub(crate) transitive_closure: DiGraph,
+    pub(crate) transitive_closure: DiGraph<N>,
 }
 
-impl Default for CheckGraphResults {
+impl<N: GraphNodeId> Default for CheckGraphResults<N> {
     fn default() -> Self {
         Self {
             reachable: FixedBitSet::new(),
@@ -114,7 +121,10 @@ impl Default for CheckGraphResults {
 /// ["On the calculation of transitive reduction-closure of orders"][1] by Habib, Morvan and Rampon.
 ///
 /// [1]: https://doi.org/10.1016/0012-365X(93)90164-O
-pub(crate) fn check_graph(graph: &DiGraph, topological_order: &[NodeId]) -> CheckGraphResults {
+pub(crate) fn check_graph<N: GraphNodeId>(
+    graph: &DiGraph<N>,
+    topological_order: &[N],
+) -> CheckGraphResults<N> {
     if graph.node_count() == 0 {
         return CheckGraphResults::default();
     }
@@ -123,7 +133,7 @@ pub(crate) fn check_graph(graph: &DiGraph, topological_order: &[NodeId]) -> Chec
 
     // build a copy of the graph where the nodes and edges appear in topsorted order
     let mut map = <HashMap<_, _>>::with_capacity_and_hasher(n, Default::default());
-    let mut topsorted = <DiGraph>::default();
+    let mut topsorted = DiGraph::<N>::default();
     // iterate nodes in topological order
     for (i, &node) in topological_order.iter().enumerate() {
         map.insert(node, i);
@@ -219,13 +229,13 @@ pub(crate) fn check_graph(graph: &DiGraph, topological_order: &[NodeId]) -> Chec
 /// ["Finding all the elementary circuits of a directed graph"][1] by D. B. Johnson.
 ///
 /// [1]: https://doi.org/10.1137/0204007
-pub fn simple_cycles_in_component(graph: &DiGraph, scc: &[NodeId]) -> Vec<Vec<NodeId>> {
+pub fn simple_cycles_in_component<N: GraphNodeId>(graph: &DiGraph<N>, scc: &[N]) -> Vec<Vec<N>> {
     let mut cycles = vec![];
     let mut sccs = vec![SmallVec::from_slice(scc)];
 
     while let Some(mut scc) = sccs.pop() {
         // only look at nodes and edges in this strongly-connected component
-        let mut subgraph = <DiGraph>::default();
+        let mut subgraph = DiGraph::<N>::default();
         for &node in &scc {
             subgraph.add_node(node);
         }
@@ -245,12 +255,12 @@ pub fn simple_cycles_in_component(graph: &DiGraph, scc: &[NodeId]) -> Vec<Vec<No
             HashSet::with_capacity_and_hasher(subgraph.node_count(), Default::default());
         // connects nodes along path segments that can't be part of a cycle (given current root)
         // those nodes can be unblocked at the same time
-        let mut unblock_together: HashMap<NodeId, HashSet<NodeId>> =
+        let mut unblock_together: HashMap<N, HashSet<N>> =
             HashMap::with_capacity_and_hasher(subgraph.node_count(), Default::default());
         // stack for unblocking nodes
         let mut unblock_stack = Vec::with_capacity(subgraph.node_count());
         // nodes can be involved in multiple cycles
-        let mut maybe_in_more_cycles: HashSet<NodeId> =
+        let mut maybe_in_more_cycles: HashSet<N> =
             HashSet::with_capacity_and_hasher(subgraph.node_count(), Default::default());
         // stack for DFS
         let mut stack = Vec::with_capacity(subgraph.node_count());
@@ -267,7 +277,7 @@ pub fn simple_cycles_in_component(graph: &DiGraph, scc: &[NodeId]) -> Vec<Vec<No
         stack.clear();
         stack.push((root, subgraph.neighbors(root)));
         while !stack.is_empty() {
-            let (ref node, successors) = stack.last_mut().unwrap();
+            let &mut (ref node, ref mut successors) = stack.last_mut().unwrap();
             if let Some(next) = successors.next() {
                 if next == root {
                     // found a cycle

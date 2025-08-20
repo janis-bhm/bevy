@@ -17,7 +17,7 @@
 
 use bevy_app::prelude::*;
 use bevy_ecs::{
-    entity::{hash_map::EntityHashMap, hash_set::EntityHashSet},
+    entity::{EntityHashMap, EntityHashSet},
     prelude::*,
     system::SystemParam,
 };
@@ -36,10 +36,6 @@ pub struct DirectionalNavigationPlugin;
 impl Plugin for DirectionalNavigationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DirectionalNavigationMap>();
-
-        #[cfg(feature = "bevy_reflect")]
-        app.register_type::<NavNeighbors>()
-            .register_type::<DirectionalNavigationMap>();
     }
 }
 
@@ -48,7 +44,7 @@ impl Plugin for DirectionalNavigationPlugin {
 #[cfg_attr(
     feature = "bevy_reflect",
     derive(Reflect),
-    reflect(Default, Debug, PartialEq)
+    reflect(Default, Debug, PartialEq, Clone)
 )]
 pub struct NavNeighbors {
     /// The array of neighbors, one for each [`CompassOctant`].
@@ -94,7 +90,7 @@ impl NavNeighbors {
 #[cfg_attr(
     feature = "bevy_reflect",
     derive(Reflect),
-    reflect(Resource, Debug, Default, PartialEq)
+    reflect(Resource, Debug, Default, PartialEq, Clone)
 )]
 pub struct DirectionalNavigationMap {
     /// A directed graph of focusable entities.

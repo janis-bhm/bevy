@@ -3,16 +3,16 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use bevy_ecs::{
     event::EventRegistry,
     prelude::*,
-    schedule::{InternedScheduleLabel, ScheduleBuildSettings, ScheduleLabel},
-    system::{SystemId, SystemInput},
+    schedule::{InternedScheduleLabel, InternedSystemSet, ScheduleBuildSettings, ScheduleLabel},
+    system::{ScheduleSystem, SystemId, SystemInput},
 };
-use bevy_platform_support::collections::{HashMap, HashSet};
+use bevy_platform::collections::{HashMap, HashSet};
 use core::fmt::Debug;
 
 #[cfg(feature = "trace")]
 use tracing::info_span;
 
-type ExtractFn = Box<dyn Fn(&mut World, &mut World) + Send>;
+type ExtractFn = Box<dyn FnMut(&mut World, &mut World) + Send>;
 
 /// A secondary application with its own [`World`]. These can run independently of each other.
 ///
@@ -160,7 +160,7 @@ impl SubApp {
     /// The first argument is the `World` to extract data from, the second argument is the app `World`.
     pub fn set_extract<F>(&mut self, extract: F) -> &mut Self
     where
-        F: Fn(&mut World, &mut World) + Send + 'static,
+        F: FnMut(&mut World, &mut World) + Send + 'static,
     {
         self.extract = Some(Box::new(extract));
         self
@@ -177,13 +177,13 @@ impl SubApp {
     /// ```
     /// # use bevy_app::SubApp;
     /// # let mut app = SubApp::new();
-    /// let default_fn = app.take_extract();
+    /// let mut default_fn = app.take_extract();
     /// app.set_extract(move |main, render| {
     ///     // Do pre-extract custom logic
     ///     // [...]
     ///
     ///     // Call Bevy's default, which executes the Extract phase
-    ///     if let Some(f) = default_fn.as_ref() {
+    ///     if let Some(f) = default_fn.as_mut() {
     ///         f(main, render);
     ///     }
     ///
@@ -211,7 +211,7 @@ impl SubApp {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoSystemConfigs<M>,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.add_systems(schedule, systems);
@@ -233,10 +233,10 @@ impl SubApp {
 
     /// See [`App::configure_sets`].
     #[track_caller]
-    pub fn configure_sets(
+    pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoSystemSetConfigs,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.configure_sets(schedule, sets);
@@ -338,7 +338,7 @@ impl SubApp {
     /// See [`App::add_event`].
     pub fn add_event<T>(&mut self) -> &mut Self
     where
-        T: Event,
+        T: BufferedEvent,
     {
         if !self.world.contains_resource::<Events<T>>() {
             EventRegistry::register_event::<T>(self.world_mut());
@@ -401,25 +401,29 @@ impl SubApp {
 
     /// Runs [`Plugin::finish`] for each plugin.
     pub fn finish(&mut self) {
-        let plugins = core::mem::take(&mut self.plugin_registry);
-        self.run_as_app(|app| {
-            for plugin in &plugins {
-                plugin.finish(app);
-            }
-        });
-        self.plugin_registry = plugins;
+        // do hokey pokey with a boxed zst plugin (doesn't allocate)
+        let mut hokeypokey: Box<dyn Plugin> = Box::new(crate::HokeyPokey);
+        for i in 0..self.plugin_registry.len() {
+            core::mem::swap(&mut self.plugin_registry[i], &mut hokeypokey);
+            self.run_as_app(|app| {
+                hokeypokey.finish(app);
+            });
+            core::mem::swap(&mut self.plugin_registry[i], &mut hokeypokey);
+        }
         self.plugins_state = PluginsState::Finished;
     }
 
     /// Runs [`Plugin::cleanup`] for each plugin.
     pub fn cleanup(&mut self) {
-        let plugins = core::mem::take(&mut self.plugin_registry);
-        self.run_as_app(|app| {
-            for plugin in &plugins {
-                plugin.cleanup(app);
-            }
-        });
-        self.plugin_registry = plugins;
+        // do hokey pokey with a boxed zst plugin (doesn't allocate)
+        let mut hokeypokey: Box<dyn Plugin> = Box::new(crate::HokeyPokey);
+        for i in 0..self.plugin_registry.len() {
+            core::mem::swap(&mut self.plugin_registry[i], &mut hokeypokey);
+            self.run_as_app(|app| {
+                hokeypokey.cleanup(app);
+            });
+            core::mem::swap(&mut self.plugin_registry[i], &mut hokeypokey);
+        }
         self.plugins_state = PluginsState::Cleaned;
     }
 

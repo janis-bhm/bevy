@@ -4,7 +4,7 @@ use crate::io::{
     AssetSourceEvent, AssetWatcher,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use bevy_platform_support::collections::HashMap;
+use bevy_platform::collections::HashMap;
 use core::time::Duration;
 use notify_debouncer_full::{notify::RecommendedWatcher, Debouncer, RecommendedCache};
 use parking_lot::RwLock;
@@ -24,6 +24,7 @@ pub struct EmbeddedWatcher {
 }
 
 impl EmbeddedWatcher {
+    /// Creates a new `EmbeddedWatcher` that watches for changes to the embedded assets in the given `dir`.
     pub fn new(
         dir: Dir,
         root_paths: Arc<RwLock<HashMap<Box<Path>, PathBuf>>>,
@@ -55,6 +56,7 @@ pub(crate) struct EmbeddedEventHandler {
     dir: Dir,
     last_event: Option<AssetSourceEvent>,
 }
+
 impl FilesystemEventHandler for EmbeddedEventHandler {
     fn begin(&mut self) {
         self.last_event = None;
@@ -71,15 +73,15 @@ impl FilesystemEventHandler for EmbeddedEventHandler {
 
     fn handle(&mut self, absolute_paths: &[PathBuf], event: AssetSourceEvent) {
         if self.last_event.as_ref() != Some(&event) {
-            if let AssetSourceEvent::ModifiedAsset(path) = &event {
-                if let Ok(file) = File::open(&absolute_paths[0]) {
-                    let mut reader = BufReader::new(file);
-                    let mut buffer = Vec::new();
+            if let AssetSourceEvent::ModifiedAsset(path) = &event
+                && let Ok(file) = File::open(&absolute_paths[0])
+            {
+                let mut reader = BufReader::new(file);
+                let mut buffer = Vec::new();
 
-                    // Read file into vector.
-                    if reader.read_to_end(&mut buffer).is_ok() {
-                        self.dir.insert_asset(path, buffer);
-                    }
+                // Read file into vector.
+                if reader.read_to_end(&mut buffer).is_ok() {
+                    self.dir.insert_asset(path, buffer);
                 }
             }
             self.last_event = Some(event.clone());

@@ -3,7 +3,7 @@
 
 use std::f32::consts::*;
 
-use bevy::{math::ops, prelude::*, render::mesh::skinning::SkinnedMesh};
+use bevy::{math::ops, mesh::skinning::SkinnedMesh, prelude::*};
 
 fn main() {
     App::new()
@@ -51,7 +51,7 @@ fn joint_animation(
     // Iter skinned mesh entity
     for child_of in &children {
         // Mesh node is the parent of the skinned mesh entity.
-        let mesh_node_entity = child_of.get();
+        let mesh_node_entity = child_of.parent();
         // Get `Children` in the mesh node.
         let mesh_node_parent = parents.get(mesh_node_entity).unwrap();
 

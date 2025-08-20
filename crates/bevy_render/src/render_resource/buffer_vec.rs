@@ -68,7 +68,7 @@ impl<T: NoUninit> RawBufferVec<T> {
 
     /// Returns the binding for the buffer if the data has been uploaded.
     #[inline]
-    pub fn binding(&self) -> Option<BindingResource> {
+    pub fn binding(&self) -> Option<BindingResource<'_>> {
         Some(BindingResource::Buffer(
             self.buffer()?.as_entire_buffer_binding(),
         ))
@@ -101,6 +101,11 @@ impl<T: NoUninit> RawBufferVec<T> {
 
     pub fn append(&mut self, other: &mut RawBufferVec<T>) {
         self.values.append(&mut other.values);
+    }
+
+    /// Returns the value at the given index.
+    pub fn get(&self, index: u32) -> Option<&T> {
+        self.values.get(index as usize)
     }
 
     /// Sets the value at the given index.
@@ -175,6 +180,31 @@ impl<T: NoUninit> RawBufferVec<T> {
             let range = 0..self.item_size * self.values.len();
             let bytes: &[u8] = must_cast_slice(&self.values);
             queue.write_buffer(buffer, 0, &bytes[range]);
+        }
+    }
+
+    /// Queues writing of data from system RAM to VRAM using the [`RenderDevice`]
+    /// and the provided [`RenderQueue`].
+    ///
+    /// Before queuing the write, a [`reserve`](RawBufferVec::reserve) operation
+    /// is executed.
+    ///
+    /// This will only write the data contained in the given range. It is useful if you only want
+    /// to update a part of the buffer.
+    pub fn write_buffer_range(
+        &mut self,
+        device: &RenderDevice,
+        render_queue: &RenderQueue,
+        range: core::ops::Range<usize>,
+    ) {
+        if self.values.is_empty() {
+            return;
+        }
+        self.reserve(self.values.len(), device);
+        if let Some(buffer) = &self.buffer {
+            // Cast only the bytes we need to write
+            let bytes: &[u8] = must_cast_slice(&self.values[range.start..range.end]);
+            render_queue.write_buffer(buffer, (range.start * self.item_size) as u64, bytes);
         }
     }
 
@@ -280,7 +310,7 @@ where
 
     /// Returns the binding for the buffer if the data has been uploaded.
     #[inline]
-    pub fn binding(&self) -> Option<BindingResource> {
+    pub fn binding(&self) -> Option<BindingResource<'_>> {
         Some(BindingResource::Buffer(
             self.buffer()?.as_entire_buffer_binding(),
         ))
@@ -311,7 +341,7 @@ where
 
         // TODO: Consider using unsafe code to push uninitialized, to prevent
         // the zeroing. It shows up in profiles.
-        self.data.extend(iter::repeat(0).take(element_size));
+        self.data.extend(iter::repeat_n(0, element_size));
 
         // Take a slice of the new data for `write_into` to use. This is
         // important: it hoists the bounds check up here so that the compiler
@@ -384,6 +414,31 @@ where
         queue.write_buffer(buffer, 0, &self.data);
     }
 
+    /// Queues writing of data from system RAM to VRAM using the [`RenderDevice`]
+    /// and the provided [`RenderQueue`].
+    ///
+    /// Before queuing the write, a [`reserve`](BufferVec::reserve) operation
+    /// is executed.
+    ///
+    /// This will only write the data contained in the given range. It is useful if you only want
+    /// to update a part of the buffer.
+    pub fn write_buffer_range(
+        &mut self,
+        device: &RenderDevice,
+        render_queue: &RenderQueue,
+        range: core::ops::Range<usize>,
+    ) {
+        if self.data.is_empty() {
+            return;
+        }
+        let item_size = u64::from(T::min_size()) as usize;
+        self.reserve(self.data.len() / item_size, device);
+        if let Some(buffer) = &self.buffer {
+            let bytes = &self.data[range.start..range.end];
+            render_queue.write_buffer(buffer, (range.start * item_size) as u64, bytes);
+        }
+    }
+
     /// Reduces the length of the buffer.
     pub fn truncate(&mut self, len: usize) {
         self.data.truncate(u64::from(T::min_size()) as usize * len);
@@ -443,7 +498,7 @@ where
 
     /// Returns the binding for the buffer if the data has been uploaded.
     #[inline]
-    pub fn binding(&self) -> Option<BindingResource> {
+    pub fn binding(&self) -> Option<BindingResource<'_>> {
         Some(BindingResource::Buffer(
             self.buffer()?.as_entire_buffer_binding(),
         ))
@@ -451,8 +506,14 @@ where
 
     /// Reserves space for one more element in the buffer and returns its index.
     pub fn add(&mut self) -> usize {
+        self.add_multiple(1)
+    }
+
+    /// Reserves space for the given number of elements in the buffer and
+    /// returns the index of the first one.
+    pub fn add_multiple(&mut self, count: usize) -> usize {
         let index = self.len;
-        self.len += 1;
+        self.len += count;
         index
     }
 

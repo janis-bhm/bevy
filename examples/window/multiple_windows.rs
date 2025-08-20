@@ -1,6 +1,6 @@
 //! Uses two windows to visualize a 3D model from different angles.
 
-use bevy::{prelude::*, render::camera::RenderTarget, window::WindowRef};
+use bevy::{camera::RenderTarget, prelude::*, window::WindowRef};
 
 fn main() {
     App::new()
@@ -54,16 +54,15 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..default()
     };
 
-    commands.spawn((
-        Text::new("First window"),
-        node.clone(),
-        // Since we are using multiple cameras, we need to specify which camera UI should be rendered to
-        UiTargetCamera(first_window_camera),
-    ));
+    commands
+        .spawn((
+            node.clone(),
+            // Since we are using multiple cameras, we need to specify which camera UI should be rendered to
+            UiTargetCamera(first_window_camera),
+        ))
+        .with_child((Text::new("First window"), TextShadow::default()));
 
-    commands.spawn((
-        Text::new("Second window"),
-        node,
-        UiTargetCamera(second_window_camera),
-    ));
+    commands
+        .spawn((node, UiTargetCamera(second_window_camera)))
+        .with_child((Text::new("Second window"), TextShadow::default()));
 }

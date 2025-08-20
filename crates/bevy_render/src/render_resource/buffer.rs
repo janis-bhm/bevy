@@ -1,6 +1,5 @@
 use crate::define_atomic_id;
-use crate::renderer::WgpuWrapper;
-use alloc::sync::Arc;
+use crate::WgpuWrapper;
 use core::ops::{Bound, Deref, RangeBounds};
 
 define_atomic_id!(BufferId);
@@ -8,8 +7,7 @@ define_atomic_id!(BufferId);
 #[derive(Clone, Debug)]
 pub struct Buffer {
     id: BufferId,
-    value: Arc<WgpuWrapper<wgpu::Buffer>>,
-    size: wgpu::BufferAddress,
+    value: WgpuWrapper<wgpu::Buffer>,
 }
 
 impl Buffer {
@@ -18,7 +16,7 @@ impl Buffer {
         self.id
     }
 
-    pub fn slice(&self, bounds: impl RangeBounds<wgpu::BufferAddress>) -> BufferSlice {
+    pub fn slice(&self, bounds: impl RangeBounds<wgpu::BufferAddress>) -> BufferSlice<'_> {
         // need to compute and store this manually because wgpu doesn't export offset and size on wgpu::BufferSlice
         let offset = match bounds.start_bound() {
             Bound::Included(&bound) => bound,
@@ -28,7 +26,7 @@ impl Buffer {
         let size = match bounds.end_bound() {
             Bound::Included(&bound) => bound + 1,
             Bound::Excluded(&bound) => bound,
-            Bound::Unbounded => self.size,
+            Bound::Unbounded => self.value.size(),
         } - offset;
         BufferSlice {
             id: self.id,
@@ -48,8 +46,7 @@ impl From<wgpu::Buffer> for Buffer {
     fn from(value: wgpu::Buffer) -> Self {
         Buffer {
             id: BufferId::new(),
-            size: value.size(),
-            value: Arc::new(WgpuWrapper::new(value)),
+            value: WgpuWrapper::new(value),
         }
     }
 }

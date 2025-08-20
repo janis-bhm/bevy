@@ -1,19 +1,14 @@
-use bevy_math::Vec3;
-pub use bevy_mesh::*;
-use morph::{MeshMorphWeights, MorphWeights};
 pub mod allocator;
-mod components;
 use crate::{
-    primitives::Aabb,
     render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
     render_resource::TextureView,
     texture::GpuImage,
-    view::VisibilitySystems,
     RenderApp,
 };
 use allocator::MeshAllocatorPlugin;
 use bevy_app::{App, Plugin, PostUpdate};
-use bevy_asset::{AssetApp, AssetId, RenderAssetUsages};
+use bevy_asset::{AssetApp, AssetEventSystems, AssetId, RenderAssetUsages};
+use bevy_camera::visibility::VisibilitySystems;
 use bevy_ecs::{
     prelude::*,
     system::{
@@ -21,7 +16,8 @@ use bevy_ecs::{
         SystemParamItem,
     },
 };
-pub use components::{mark_3d_meshes_as_changed_if_their_assets_changed, Mesh2d, Mesh3d};
+use bevy_mesh::morph::{MeshMorphWeights, MorphWeights};
+use bevy_mesh::*;
 use wgpu::IndexFormat;
 
 /// Adds the [`Mesh`] as an asset and makes sure that they are extracted and prepared for the GPU.
@@ -32,16 +28,14 @@ impl Plugin for MeshPlugin {
         app.init_asset::<Mesh>()
             .init_asset::<skinning::SkinnedMeshInverseBindposes>()
             .register_asset_reflect::<Mesh>()
-            .register_type::<Mesh3d>()
-            .register_type::<skinning::SkinnedMesh>()
-            .register_type::<Vec<Entity>>()
             // 'Mesh' must be prepared after 'Image' as meshes rely on the morph target image being ready
             .add_plugins(RenderAssetPlugin::<RenderMesh, GpuImage>::default())
             .add_plugins(MeshAllocatorPlugin)
             .add_systems(
                 PostUpdate,
                 mark_3d_meshes_as_changed_if_their_assets_changed
-                    .ambiguous_with(VisibilitySystems::CalculateBounds),
+                    .ambiguous_with(VisibilitySystems::CalculateBounds)
+                    .before(AssetEventSystems),
             );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -57,9 +51,7 @@ impl Plugin for MeshPlugin {
 pub struct MorphPlugin;
 impl Plugin for MorphPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<MorphWeights>()
-            .register_type::<MeshMorphWeights>()
-            .add_systems(PostUpdate, inherit_weights);
+        app.add_systems(PostUpdate, inherit_weights.in_set(InheritWeightSystems));
     }
 }
 
@@ -77,26 +69,6 @@ pub fn inherit_weights(
             child_weight.clear_weights();
             child_weight.extend_weights(parent_weights.weights());
         }
-    }
-}
-
-pub trait MeshAabb {
-    /// Compute the Axis-Aligned Bounding Box of the mesh vertices in model space
-    ///
-    /// Returns `None` if `self` doesn't have [`Mesh::ATTRIBUTE_POSITION`] of
-    /// type [`VertexAttributeValues::Float32x3`], or if `self` doesn't have any vertices.
-    fn compute_aabb(&self) -> Option<Aabb>;
-}
-
-impl MeshAabb for Mesh {
-    fn compute_aabb(&self) -> Option<Aabb> {
-        let Some(VertexAttributeValues::Float32x3(values)) =
-            self.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            return None;
-        };
-
-        Aabb::enclosing(values.iter().map(|p| Vec3::from_slice(p)))
     }
 }
 
@@ -164,7 +136,7 @@ impl RenderAsset for RenderMesh {
         let mut vertex_size = 0;
         for attribute_data in mesh.attributes() {
             let vertex_format = attribute_data.0.format;
-            vertex_size += vertex_format.get_size() as usize;
+            vertex_size += vertex_format.size() as usize;
         }
 
         let vertex_count = mesh.count_vertices();
@@ -176,7 +148,8 @@ impl RenderAsset for RenderMesh {
     fn prepare_asset(
         mesh: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
-        (images, ref mut mesh_vertex_buffer_layouts): &mut SystemParamItem<Self::Param>,
+        (images, mesh_vertex_buffer_layouts): &mut SystemParamItem<Self::Param>,
+        _: Option<&Self>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         let morph_targets = match mesh.morph_targets() {
             Some(mt) => {

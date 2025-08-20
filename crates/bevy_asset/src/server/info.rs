@@ -11,7 +11,7 @@ use alloc::{
     vec::Vec,
 };
 use bevy_ecs::world::World;
-use bevy_platform_support::collections::{hash_map::Entry, HashMap, HashSet};
+use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
 use bevy_tasks::Task;
 use bevy_utils::TypeIdMap;
 use core::{any::TypeId, task::Waker};
@@ -133,13 +133,11 @@ impl AssetInfos {
             .get(&type_id)
             .ok_or(MissingHandleProviderError(type_id))?;
 
-        if watching_for_changes {
-            if let Some(path) = &path {
-                let mut without_label = path.to_owned();
-                if let Some(label) = without_label.take_label() {
-                    let labels = living_labeled_assets.entry(without_label).or_default();
-                    labels.insert(label.as_ref().into());
-                }
+        if watching_for_changes && let Some(path) = &path {
+            let mut without_label = path.to_owned();
+            if let Some(label) = without_label.take_label() {
+                let labels = living_labeled_assets.entry(without_label).or_default();
+                labels.insert(label.as_ref().into());
             }
         }
 
@@ -347,14 +345,9 @@ impl AssetInfos {
 
     /// Returns `true` if the asset this path points to is still alive
     pub(crate) fn is_path_alive<'a>(&self, path: impl Into<AssetPath<'a>>) -> bool {
-        let path = path.into();
-
-        let result = self
-            .get_path_ids(&path)
+        self.get_path_ids(&path.into())
             .filter_map(|id| self.infos.get(&id))
-            .any(|info| info.weak_handle.strong_count() > 0);
-
-        result
+            .any(|info| info.weak_handle.strong_count() > 0)
     }
 
     /// Returns `true` if the asset at this path should be reloaded

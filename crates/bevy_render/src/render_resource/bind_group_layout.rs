@@ -1,6 +1,6 @@
-use crate::define_atomic_id;
-use crate::renderer::WgpuWrapper;
-use alloc::sync::Arc;
+use crate::{define_atomic_id, renderer::RenderDevice, WgpuWrapper};
+use bevy_ecs::system::Res;
+use bevy_platform::sync::OnceLock;
 use core::ops::Deref;
 
 define_atomic_id!(BindGroupLayoutId);
@@ -12,11 +12,11 @@ define_atomic_id!(BindGroupLayoutId);
 /// which can be cloned as needed to workaround lifetime management issues. It may be converted
 /// from and dereferences to wgpu's [`BindGroupLayout`](wgpu::BindGroupLayout).
 ///
-/// Can be created via [`RenderDevice::create_bind_group_layout`](crate::RenderDevice::create_bind_group_layout).
+/// Can be created via [`RenderDevice::create_bind_group_layout`](crate::renderer::RenderDevice::create_bind_group_layout).
 #[derive(Clone, Debug)]
 pub struct BindGroupLayout {
     id: BindGroupLayoutId,
-    value: Arc<WgpuWrapper<wgpu::BindGroupLayout>>,
+    value: WgpuWrapper<wgpu::BindGroupLayout>,
 }
 
 impl PartialEq for BindGroupLayout {
@@ -50,7 +50,7 @@ impl From<wgpu::BindGroupLayout> for BindGroupLayout {
     fn from(value: wgpu::BindGroupLayout) -> Self {
         BindGroupLayout {
             id: BindGroupLayoutId::new(),
-            value: Arc::new(WgpuWrapper::new(value)),
+            value: WgpuWrapper::new(value),
         }
     }
 }
@@ -62,4 +62,20 @@ impl Deref for BindGroupLayout {
     fn deref(&self) -> &Self::Target {
         &self.value
     }
+}
+
+static EMPTY_BIND_GROUP_LAYOUT: OnceLock<BindGroupLayout> = OnceLock::new();
+
+pub(crate) fn init_empty_bind_group_layout(render_device: Res<RenderDevice>) {
+    let layout = render_device.create_bind_group_layout(Some("empty_bind_group_layout"), &[]);
+    EMPTY_BIND_GROUP_LAYOUT
+        .set(layout)
+        .expect("init_empty_bind_group_layout was called more than once");
+}
+
+pub fn empty_bind_group_layout() -> BindGroupLayout {
+    EMPTY_BIND_GROUP_LAYOUT
+        .get()
+        .expect("init_empty_bind_group_layout was not called")
+        .clone()
 }

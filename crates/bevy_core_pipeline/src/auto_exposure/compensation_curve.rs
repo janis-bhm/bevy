@@ -1,9 +1,9 @@
-use bevy_asset::prelude::*;
+use bevy_asset::{prelude::*, RenderAssetUsages};
 use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use bevy_math::{cubic_splines::CubicGenerator, FloatExt, Vec2};
 use bevy_reflect::prelude::*;
 use bevy_render::{
-    render_asset::{RenderAsset, RenderAssetUsages},
+    render_asset::RenderAsset,
     render_resource::{
         Extent3d, ShaderType, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
         TextureView, UniformBuffer,
@@ -18,7 +18,7 @@ const LUT_SIZE: usize = 256;
 /// This curve is used to map the average log luminance of a scene to an
 /// exposure compensation value, to allow for fine control over the final exposure.
 #[derive(Asset, Reflect, Debug, Clone)]
-#[reflect(Default)]
+#[reflect(Default, Clone)]
 pub struct AutoExposureCompensationCurve {
     /// The minimum log luminance value in the curve. (the x-axis)
     min_log_lum: f32,
@@ -196,6 +196,7 @@ impl RenderAsset for GpuAutoExposureCompensationCurve {
         source: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
         (render_device, render_queue): &mut SystemParamItem<Self::Param>,
+        _: Option<&Self>,
     ) -> Result<Self, bevy_render::render_asset::PrepareAssetError<Self::SourceAsset>> {
         let texture = render_device.create_texture_with_data(
             render_queue,

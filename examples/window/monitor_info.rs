@@ -1,8 +1,8 @@
 //! Displays information about available monitors (displays).
 
 use bevy::{
+    camera::RenderTarget,
     prelude::*,
-    render::camera::RenderTarget,
     window::{ExitCondition, Monitor, WindowMode, WindowRef},
 };
 
@@ -44,7 +44,10 @@ fn update(
             .spawn((
                 Window {
                     title: name.clone(),
-                    mode: WindowMode::Fullscreen(MonitorSelection::Entity(entity)),
+                    mode: WindowMode::Fullscreen(
+                        MonitorSelection::Entity(entity),
+                        VideoModeSelection::Current,
+                    ),
                     position: WindowPosition::Centered(MonitorSelection::Entity(entity)),
                     ..default()
                 },

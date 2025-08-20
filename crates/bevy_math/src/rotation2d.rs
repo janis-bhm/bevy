@@ -30,9 +30,11 @@ use bevy_reflect::{ReflectDeserialize, ReflectSerialize};
 /// assert_eq!(rotation2.as_radians(), PI / 4.0);
 ///
 /// // "Add" rotations together using `*`
+/// #[cfg(feature = "approx")]
 /// assert_relative_eq!(rotation1 * rotation2, Rot2::degrees(135.0));
 ///
 /// // Rotate vectors
+/// #[cfg(feature = "approx")]
 /// assert_relative_eq!(rotation1 * Vec2::X, Vec2::Y);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,7 +42,7 @@ use bevy_reflect::{ReflectDeserialize, ReflectSerialize};
 #[cfg_attr(
     feature = "bevy_reflect",
     derive(Reflect),
-    reflect(Debug, PartialEq, Default)
+    reflect(Debug, PartialEq, Default, Clone)
 )]
 #[cfg_attr(
     all(feature = "serialize", feature = "bevy_reflect"),
@@ -116,9 +118,11 @@ impl Rot2 {
     ///
     /// let rot1 = Rot2::radians(3.0 * FRAC_PI_2);
     /// let rot2 = Rot2::radians(-FRAC_PI_2);
+    /// #[cfg(feature = "approx")]
     /// assert_relative_eq!(rot1, rot2);
     ///
     /// let rot3 = Rot2::radians(PI);
+    /// #[cfg(feature = "approx")]
     /// assert_relative_eq!(rot1 * rot1, rot3);
     /// ```
     #[inline]
@@ -141,9 +145,11 @@ impl Rot2 {
     ///
     /// let rot1 = Rot2::degrees(270.0);
     /// let rot2 = Rot2::degrees(-90.0);
+    /// #[cfg(feature = "approx")]
     /// assert_relative_eq!(rot1, rot2);
     ///
     /// let rot3 = Rot2::degrees(180.0);
+    /// #[cfg(feature = "approx")]
     /// assert_relative_eq!(rot1 * rot1, rot3);
     /// ```
     #[inline]
@@ -165,9 +171,11 @@ impl Rot2 {
     ///
     /// let rot1 = Rot2::turn_fraction(0.75);
     /// let rot2 = Rot2::turn_fraction(-0.25);
+    /// #[cfg(feature = "approx")]
     /// assert_relative_eq!(rot1, rot2);
     ///
     /// let rot3 = Rot2::turn_fraction(0.5);
+    /// #[cfg(feature = "approx")]
     /// assert_relative_eq!(rot1 * rot1, rot3);
     /// ```
     #[inline]
@@ -438,7 +446,7 @@ impl From<f32> for Rot2 {
 impl From<Rot2> for Mat2 {
     /// Creates a [`Mat2`] rotation matrix from a [`Rot2`].
     fn from(rot: Rot2) -> Self {
-        Mat2::from_cols_array(&[rot.cos, -rot.sin, rot.sin, rot.cos])
+        Mat2::from_cols_array(&[rot.cos, rot.sin, -rot.sin, rot.cos])
     }
 }
 
@@ -510,7 +518,7 @@ mod tests {
 
     use approx::assert_relative_eq;
 
-    use crate::{ops, Dir2, Rot2, Vec2};
+    use crate::{ops, Dir2, Mat2, Rot2, Vec2};
 
     #[test]
     fn creation() {
@@ -712,5 +720,21 @@ mod tests {
         assert!(rot1.slerp(rot2, 0.0).is_near_identity());
         assert_eq!(rot1.slerp(rot2, 0.5).as_degrees(), 90.0);
         assert_eq!(ops::abs(rot1.slerp(rot2, 1.0).as_degrees()), 180.0);
+    }
+
+    #[test]
+    fn rotation_matrix() {
+        let rotation = Rot2::degrees(90.0);
+        let matrix: Mat2 = rotation.into();
+
+        // Check that the matrix is correct.
+        assert_relative_eq!(matrix.x_axis, Vec2::Y);
+        assert_relative_eq!(matrix.y_axis, Vec2::NEG_X);
+
+        // Check that the matrix rotates vectors correctly.
+        assert_relative_eq!(matrix * Vec2::X, Vec2::Y);
+        assert_relative_eq!(matrix * Vec2::Y, Vec2::NEG_X);
+        assert_relative_eq!(matrix * Vec2::NEG_X, Vec2::NEG_Y);
+        assert_relative_eq!(matrix * Vec2::NEG_Y, Vec2::X);
     }
 }

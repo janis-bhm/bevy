@@ -15,7 +15,7 @@ use core::marker::PhantomData;
 
 use crate::{
     self as bevy_ecs,
-    bundle::{Bundle, InsertMode, NoBundleEffect},
+    bundle::{BoxedBundle, Bundle, InsertMode, NoBundleEffect, BOX_BUNDLE_THRESHOLD},
     change_detection::{MaybeLocation, Mut},
     component::{Component, ComponentId, Mutable},
     entity::{Entities, Entity, EntityClonerBuilder, EntityDoesNotExistError, OptIn, OptOut},
@@ -383,26 +383,51 @@ impl<'w, 's> Commands<'w, 's> {
         };
         let caller = MaybeLocation::caller();
 
-        entity_commands.queue(move |mut entity: EntityWorldMut| {
-            // Store metadata about the spawn operation.
-            // This is the same as in `spawn_empty`, but merged into
-            // the same command for better performance.
-            let index = entity.id().index();
-            entity.world_scope(|world| {
-                let tick = world.change_tick();
-                // SAFETY: Entity has been flushed
-                unsafe {
-                    world.entities_mut().mark_spawn_despawn(index, caller, tick);
-                }
-            });
+        if size_of::<T>() >= BOX_BUNDLE_THRESHOLD {
+            let bundle = BoxedBundle::new(bundle);
+            entity_commands.queue(move |mut entity: EntityWorldMut| {
+                // Store metadata about the spawn operation.
+                // This is the same as in `spawn_empty`, but merged into
+                // the same command for better performance.
+                let index = entity.id().index();
+                entity.world_scope(|world| {
+                    let tick = world.change_tick();
+                    // SAFETY: Entity has been flushed
+                    unsafe {
+                        world.entities_mut().mark_spawn_despawn(index, caller, tick);
+                    }
+                });
 
-            entity.insert_with_caller(
-                bundle,
-                InsertMode::Replace,
-                caller,
-                crate::relationship::RelationshipHookMode::Run,
-            );
-        });
+                entity.insert_with_caller(
+                    bundle,
+                    InsertMode::Replace,
+                    caller,
+                    crate::relationship::RelationshipHookMode::Run,
+                );
+            });
+        } else {
+            entity_commands.queue(move |mut entity: EntityWorldMut| {
+                // Store metadata about the spawn operation.
+                // This is the same as in `spawn_empty`, but merged into
+                // the same command for better performance.
+                let index = entity.id().index();
+                entity.world_scope(|world| {
+                    let tick = world.change_tick();
+                    // SAFETY: Entity has been flushed
+                    unsafe {
+                        world.entities_mut().mark_spawn_despawn(index, caller, tick);
+                    }
+                });
+
+                entity.insert_with_caller(
+                    bundle,
+                    InsertMode::Replace,
+                    caller,
+                    crate::relationship::RelationshipHookMode::Run,
+                );
+            });
+        }
+
         // entity_command::insert(bundle, InsertMode::Replace)
         entity_commands
     }

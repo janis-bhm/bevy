@@ -270,3 +270,6 @@ pub trait BundleEffect {
 /// A trait implemented for [`BundleEffect`] implementations that do nothing. This is used as a type constraint for
 /// [`Bundle`] APIs that do not / cannot run [`DynamicBundle::Effect`], such as "batch spawn" APIs.
 pub trait NoBundleEffect {}
+
+/// Size threshold for when to box bundles.
+pub(crate) const BOX_BUNDLE_THRESHOLD: usize = if cfg!(debug_assertions) { 2048 } else { 4096 };

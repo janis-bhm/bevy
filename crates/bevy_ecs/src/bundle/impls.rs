@@ -1,13 +1,18 @@
+use alloc::boxed::Box;
 use core::any::TypeId;
 
 use bevy_ptr::OwningPtr;
 use variadics_please::all_tuples;
 
 use crate::{
-    bundle::{BoxedBundle, Bundle, BundleEffect, BundleFromComponents, DynamicBundle, NoBundleEffect},
+    bundle::{
+        BoxedBundle, Bundle, BundleEffect, BundleFromComponents, DynamicBundle, NoBundleEffect,
+    },
     component::{Component, ComponentId, Components, ComponentsRegistrator, StorageType},
     world::EntityWorldMut,
 };
+
+use super::BoxedEffect;
 
 // SAFETY:
 // - `Bundle::component_ids` calls `ids` for C's component id (and nothing else)
@@ -47,7 +52,7 @@ impl<C: Component> DynamicBundle for C {
 
 impl<B: Bundle> BoxedBundle<B> {
     pub fn new(bundle: B) -> Self {
-        Self(alloc::boxed::Box::new(bundle))
+        Self(Box::new(bundle))
     }
 }
 
@@ -66,6 +71,36 @@ impl<B: Bundle> DynamicBundle for BoxedBundle<B> {
 
     fn get_components(self, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) -> Self::Effect {
         self.0.get_components(func)
+    }
+}
+
+impl<B: Bundle> BoxedEffect<B> {
+    pub fn new(bundle: B) -> Self {
+        Self(bundle)
+    }
+}
+
+unsafe impl<B: Bundle> Bundle for BoxedEffect<B> {
+    fn component_ids(components: &mut ComponentsRegistrator, ids: &mut impl FnMut(ComponentId)) {
+        B::component_ids(components, ids)
+    }
+
+    fn get_component_ids(components: &Components, ids: &mut impl FnMut(Option<ComponentId>)) {
+        B::get_component_ids(components, ids)
+    }
+}
+
+impl<B: Bundle> DynamicBundle for BoxedEffect<B> {
+    type Effect = Box<B::Effect>;
+
+    fn get_components(self, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) -> Self::Effect {
+        Box::new(self.0.get_components(func))
+    }
+}
+
+impl<B: BundleEffect> BundleEffect for Box<B> {
+    fn apply(self, entity: &mut EntityWorldMut) {
+        (*self).apply(entity);
     }
 }
 

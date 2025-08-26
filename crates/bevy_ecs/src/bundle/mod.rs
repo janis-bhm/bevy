@@ -253,6 +253,10 @@ pub trait DynamicBundle {
 /// may still be passed on the stack at various points and may need to be wrapped in turn.
 pub struct BoxedBundle<B>(pub(crate) alloc::boxed::Box<B>);
 
+/// A wrapper type for a `Bundle` whose effects are boxed.
+#[repr(transparent)]
+pub(crate) struct BoxedEffect<B>(pub(crate) B);
+
 /// An operation on an [`Entity`](crate::entity::Entity) that occurs _after_ inserting the
 /// [`Bundle`] that defined this bundle effect.
 /// The order of operations is:

@@ -1,4 +1,4 @@
-use core::ptr::NonNull;
+use core::{mem::MaybeUninit, ptr::NonNull};
 
 use bevy_ptr::ConstNonNull;
 
@@ -13,6 +13,8 @@ use crate::{
     storage::Table,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
+
+use super::{BoxedBundle, BoxedEffect, BOX_BUNDLE_THRESHOLD};
 
 // SAFETY: We have exclusive world access so our pointers can't be invalidated externally
 pub(crate) struct BundleSpawner<'w> {
@@ -85,12 +87,13 @@ impl<'w> BundleSpawner<'w> {
     /// `entity` must be allocated (but non-existent), `T` must match this [`BundleInfo`]'s type
     #[inline]
     #[track_caller]
-    pub unsafe fn spawn_non_existent<T: DynamicBundle>(
+    pub unsafe fn spawn_non_existent<'e, T: DynamicBundle>(
         &mut self,
         entity: Entity,
         bundle: T,
         caller: MaybeLocation,
-    ) -> (EntityLocation, T::Effect) {
+        effect: &'e mut MaybeUninit<T::Effect>,
+    ) -> (EntityLocation, &'e mut T::Effect) {
         // SAFETY: We do not make any structural changes to the archetype graph through self.world so these pointers always remain valid
         let bundle_info = self.bundle_info.as_ref();
         let (location, after_effect) = {
@@ -113,6 +116,7 @@ impl<'w> BundleSpawner<'w> {
                 table_row,
                 self.change_tick,
                 bundle,
+                effect,
                 InsertMode::Replace,
                 caller,
             );
@@ -171,9 +175,17 @@ impl<'w> BundleSpawner<'w> {
         caller: MaybeLocation,
     ) -> (Entity, T::Effect) {
         let entity = self.entities().alloc();
+
+        let mut effects = alloc::boxed::Box::new_uninit();
         // SAFETY: entity is allocated (but non-existent), `T` matches this BundleInfo's type
-        let (_, after_effect) = unsafe { self.spawn_non_existent(entity, bundle, caller) };
-        (entity, after_effect)
+        if size_of::<T>() >= BOX_BUNDLE_THRESHOLD {
+            let bundle = BoxedBundle::new(bundle);
+            unsafe { self.spawn_non_existent(entity, bundle, caller, &mut effects) }
+        } else {
+            unsafe { self.spawn_non_existent(entity, bundle, caller, &mut effects) }
+        };
+
+        (entity, *effects.assume_init())
     }
 
     #[inline]

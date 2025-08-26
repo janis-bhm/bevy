@@ -13,15 +13,16 @@ pub mod unsafe_world_cell;
 #[cfg(feature = "bevy_reflect")]
 pub mod reflect;
 
-pub use crate::{
-    change_detection::{Mut, Ref, CHECK_TICK_THRESHOLD},
-    world::command_queue::CommandQueue,
-};
 use crate::{
+    bundle::{BoxedBundle, BOX_BUNDLE_THRESHOLD},
     error::{DefaultErrorHandler, ErrorHandler},
     event::BufferedEvent,
     lifecycle::{ComponentHooks, ADD, DESPAWN, INSERT, REMOVE, REPLACE},
     prelude::{Add, Despawn, Insert, Remove, Replace},
+};
+pub use crate::{
+    change_detection::{Mut, Ref, CHECK_TICK_THRESHOLD},
+    world::command_queue::CommandQueue,
 };
 pub use bevy_ecs_macros::FromWorld;
 use bevy_utils::prelude::DebugName;
@@ -69,7 +70,7 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use bevy_platform::sync::atomic::{AtomicU32, Ordering};
 use bevy_ptr::{OwningPtr, Ptr, UnsafeCellDeref};
-use core::{any::TypeId, fmt};
+use core::{any::TypeId, fmt, mem::MaybeUninit};
 use log::warn;
 use unsafe_world_cell::{UnsafeEntityCell, UnsafeWorldCell};
 
@@ -1156,7 +1157,11 @@ impl World {
     /// ```
     #[track_caller]
     pub fn spawn<B: Bundle>(&mut self, bundle: B) -> EntityWorldMut<'_> {
-        self.spawn_with_caller(bundle, MaybeLocation::caller())
+        if size_of::<B>() >= BOX_BUNDLE_THRESHOLD {
+            self.spawn_with_caller(BoxedBundle::new(bundle), MaybeLocation::caller())
+        } else {
+            self.spawn_with_caller(bundle, MaybeLocation::caller())
+        }
     }
 
     pub(crate) fn spawn_with_caller<B: Bundle>(
@@ -1168,9 +1173,12 @@ impl World {
         let change_tick = self.change_tick();
         let entity = self.entities.alloc();
         let mut bundle_spawner = BundleSpawner::new::<B>(self, change_tick);
+
+        let mut effects = Box::new_uninit();
+
         // SAFETY: bundle's type matches `bundle_info`, entity is allocated but non-existent
-        let (entity_location, after_effect) =
-            unsafe { bundle_spawner.spawn_non_existent(entity, bundle, caller) };
+        let (entity_location, _) =
+            unsafe { bundle_spawner.spawn_non_existent(entity, bundle, caller, &mut effects) };
 
         let mut entity_location = Some(entity_location);
 
@@ -1182,7 +1190,7 @@ impl World {
 
         // SAFETY: entity and location are valid, as they were just created above
         let mut entity = unsafe { EntityWorldMut::new(self, entity, entity_location) };
-        after_effect.apply(&mut entity);
+        unsafe { effects.assume_init().apply(&mut entity) };
         entity
     }
 
@@ -2300,6 +2308,8 @@ impl World {
             archetype_id: ArchetypeId,
         }
 
+        let mut effect = MaybeUninit::uninit();
+
         self.flush();
         let change_tick = self.change_tick();
         // SAFETY: These come from the same world. `Self.components_registrator` can't be used since we borrow other fields too.
@@ -2331,6 +2341,7 @@ impl World {
                         first_entity,
                         first_location,
                         first_bundle,
+                        &mut effect,
                         insert_mode,
                         caller,
                         RelationshipHookMode::Run,
@@ -2359,6 +2370,7 @@ impl World {
                                 entity,
                                 location,
                                 bundle,
+                                &mut effect,
                                 insert_mode,
                                 caller,
                                 RelationshipHookMode::Run,
@@ -2445,6 +2457,8 @@ impl World {
             archetype_id: ArchetypeId,
         }
 
+        let mut effect = MaybeUninit::uninit();
+
         self.flush();
         let change_tick = self.change_tick();
         // SAFETY: These come from the same world. `Self.components_registrator` can't be used since we borrow other fields too.
@@ -2481,6 +2495,7 @@ impl World {
                             first_entity,
                             first_location,
                             first_bundle,
+                            &mut effect,
                             insert_mode,
                             caller,
                             RelationshipHookMode::Run,
@@ -2518,6 +2533,7 @@ impl World {
                             entity,
                             location,
                             bundle,
+                            &mut effect,
                             insert_mode,
                             caller,
                             RelationshipHookMode::Run,

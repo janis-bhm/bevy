@@ -245,6 +245,18 @@ pub trait DynamicBundle {
     /// ownership of the component values to `func`.
     #[doc(hidden)]
     fn get_components(self, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) -> Self::Effect;
+
+    #[doc(hidden)]
+    unsafe fn get_components_effect_into<'a>(
+        self,
+        effect: &'a mut core::mem::MaybeUninit<Self::Effect>,
+        func: &mut impl FnMut(StorageType, OwningPtr<'_>),
+    ) -> &'a mut Self::Effect
+    where
+        Self: Sized,
+    {
+        effect.write(self.get_components(func))
+    }
 }
 
 /// A "boxed" Bundle that can be used to avoid passing the bundle data on the stack.  If a

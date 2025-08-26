@@ -2039,12 +2039,15 @@ impl<'w> EntityWorldMut<'w> {
         let change_tick = self.world.change_tick();
         let mut bundle_inserter =
             BundleInserter::new::<T>(self.world, location.archetype_id, change_tick);
+
+        let mut effect = alloc::boxed::Box::new_uninit();
         // SAFETY: location matches current entity. `T` matches `bundle_info`
-        let (location, after_effect) = unsafe {
+        let (location, _after_effect) = unsafe {
             bundle_inserter.insert(
                 self.entity,
                 location,
                 bundle,
+                &mut effect,
                 mode,
                 caller,
                 relationship_hook_mode,
@@ -2053,7 +2056,7 @@ impl<'w> EntityWorldMut<'w> {
         self.location = Some(location);
         self.world.flush();
         self.update_location();
-        after_effect.apply(self);
+        unsafe { effect.assume_init().apply(self) };
         self
     }
 
@@ -4648,11 +4651,13 @@ unsafe fn insert_dynamic_bundle<
 
     // SAFETY: location matches current entity.
     unsafe {
+        let mut effect = MaybeUninit::new(());
         bundle_inserter
             .insert(
                 entity,
                 location,
                 bundle,
+                &mut effect,
                 mode,
                 caller,
                 relationship_hook_insert_mode,

@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use core::any::TypeId;
+use core::{any::TypeId, marker::PhantomData, ptr::NonNull};
 
 use bevy_ptr::OwningPtr;
 use variadics_please::all_tuples;

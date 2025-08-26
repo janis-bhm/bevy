@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use bevy_ptr::ConstNonNull;
-use core::ptr::NonNull;
+use core::{mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     archetype::{
@@ -144,15 +144,16 @@ impl<'w> BundleInserter<'w> {
     /// `entity` must currently exist in the source archetype for this inserter. `location`
     /// must be `entity`'s location in the archetype. `T` must match this [`BundleInfo`]'s type
     #[inline]
-    pub(crate) unsafe fn insert<T: DynamicBundle>(
+    pub(crate) unsafe fn insert<'e, T: DynamicBundle>(
         &mut self,
         entity: Entity,
         location: EntityLocation,
         bundle: T,
+        effect: &'e mut MaybeUninit<T::Effect>,
         insert_mode: InsertMode,
         caller: MaybeLocation,
         relationship_hook_mode: RelationshipHookMode,
-    ) -> (EntityLocation, T::Effect) {
+    ) -> (EntityLocation, &'e mut T::Effect) {
         let bundle_info = self.bundle_info.as_ref();
         let archetype_after_insert = self.archetype_after_insert.as_ref();
         let archetype = self.archetype.as_ref();
@@ -205,6 +206,7 @@ impl<'w> BundleInserter<'w> {
                     location.table_row,
                     self.change_tick,
                     bundle,
+                    effect,
                     insert_mode,
                     caller,
                 );
@@ -246,6 +248,7 @@ impl<'w> BundleInserter<'w> {
                     result.table_row,
                     self.change_tick,
                     bundle,
+                    effect,
                     insert_mode,
                     caller,
                 );
@@ -328,6 +331,7 @@ impl<'w> BundleInserter<'w> {
                     move_result.new_row,
                     self.change_tick,
                     bundle,
+                    effect,
                     insert_mode,
                     caller,
                 );

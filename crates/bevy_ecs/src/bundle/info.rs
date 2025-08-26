@@ -5,7 +5,7 @@ use bevy_platform::{
 };
 use bevy_ptr::OwningPtr;
 use bevy_utils::TypeIdMap;
-use core::{any::TypeId, ptr::NonNull};
+use core::{any::TypeId, mem::MaybeUninit, ptr::NonNull};
 use indexmap::{IndexMap, IndexSet};
 
 use crate::{
@@ -20,6 +20,8 @@ use crate::{
     query::DebugCheckedUnwrap as _,
     storage::{SparseSetIndex, SparseSets, Storages, Table, TableRow},
 };
+
+use super::BOX_BUNDLE_THRESHOLD;
 
 /// For a specific [`World`], this stores a unique value identifying a type of a registered [`Bundle`].
 ///
@@ -231,7 +233,7 @@ impl BundleInfo {
     /// `table` must be the "new" table for `entity`. `table_row` must have space allocated for the
     /// `entity`, `bundle` must match this [`BundleInfo`]'s type
     #[inline]
-    pub(super) unsafe fn write_components<'a, T: DynamicBundle, S: BundleComponentStatus>(
+    pub(super) unsafe fn write_components<'a, 'e, T: DynamicBundle, S: BundleComponentStatus>(
         &self,
         table: &mut Table,
         sparse_sets: &mut SparseSets,
@@ -241,57 +243,59 @@ impl BundleInfo {
         table_row: TableRow,
         change_tick: Tick,
         bundle: T,
+        effect: &'e mut MaybeUninit<T::Effect>,
         insert_mode: InsertMode,
         caller: MaybeLocation,
-    ) -> T::Effect {
+    ) -> &'e mut T::Effect {
         // NOTE: get_components calls this closure on each component in "bundle order".
         // bundle_info.component_ids are also in "bundle order"
         let mut bundle_component = 0;
-        let after_effect = bundle.get_components(&mut |storage_type, component_ptr| {
-            let component_id = *self
-                .contributed_component_ids
-                .get_unchecked(bundle_component);
-            // SAFETY: bundle_component is a valid index for this bundle
-            let status = unsafe { bundle_component_status.get_status(bundle_component) };
-            match storage_type {
-                StorageType::Table => {
-                    let column =
+        let after_effect =
+            bundle.get_components_effect_into(effect, &mut |storage_type, component_ptr| {
+                let component_id = *self
+                    .contributed_component_ids
+                    .get_unchecked(bundle_component);
+                // SAFETY: bundle_component is a valid index for this bundle
+                let status = unsafe { bundle_component_status.get_status(bundle_component) };
+                match storage_type {
+                    StorageType::Table => {
+                        let column =
                         // SAFETY: If component_id is in self.component_ids, BundleInfo::new ensures that
                         // the target table contains the component.
                         unsafe { table.get_column_mut(component_id).debug_checked_unwrap() };
-                    match (status, insert_mode) {
-                        (ComponentStatus::Added, _) => {
-                            column.initialize(table_row, component_ptr, change_tick, caller);
-                        }
-                        (ComponentStatus::Existing, InsertMode::Replace) => {
-                            column.replace(table_row, component_ptr, change_tick, caller);
-                        }
-                        (ComponentStatus::Existing, InsertMode::Keep) => {
-                            if let Some(drop_fn) = table.get_drop_for(component_id) {
-                                drop_fn(component_ptr);
+                        match (status, insert_mode) {
+                            (ComponentStatus::Added, _) => {
+                                column.initialize(table_row, component_ptr, change_tick, caller);
+                            }
+                            (ComponentStatus::Existing, InsertMode::Replace) => {
+                                column.replace(table_row, component_ptr, change_tick, caller);
+                            }
+                            (ComponentStatus::Existing, InsertMode::Keep) => {
+                                if let Some(drop_fn) = table.get_drop_for(component_id) {
+                                    drop_fn(component_ptr);
+                                }
                             }
                         }
                     }
-                }
-                StorageType::SparseSet => {
-                    let sparse_set =
+                    StorageType::SparseSet => {
+                        let sparse_set =
                         // SAFETY: If component_id is in self.component_ids, BundleInfo::new ensures that
                         // a sparse set exists for the component.
                         unsafe { sparse_sets.get_mut(component_id).debug_checked_unwrap() };
-                    match (status, insert_mode) {
-                        (ComponentStatus::Added, _) | (_, InsertMode::Replace) => {
-                            sparse_set.insert(entity, component_ptr, change_tick, caller);
-                        }
-                        (ComponentStatus::Existing, InsertMode::Keep) => {
-                            if let Some(drop_fn) = sparse_set.get_drop() {
-                                drop_fn(component_ptr);
+                        match (status, insert_mode) {
+                            (ComponentStatus::Added, _) | (_, InsertMode::Replace) => {
+                                sparse_set.insert(entity, component_ptr, change_tick, caller);
+                            }
+                            (ComponentStatus::Existing, InsertMode::Keep) => {
+                                if let Some(drop_fn) = sparse_set.get_drop() {
+                                    drop_fn(component_ptr);
+                                }
                             }
                         }
                     }
                 }
-            }
-            bundle_component += 1;
-        });
+                bundle_component += 1;
+            });
 
         for required_component in required_components {
             required_component.initialize(

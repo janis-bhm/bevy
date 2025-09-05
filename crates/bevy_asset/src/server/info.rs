@@ -42,7 +42,7 @@ pub(crate) struct AssetInfo {
     loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
     /// The number of handle drops to skip for this asset.
     /// See usage (and comments) in `get_or_create_path_handle` for context.
-    handle_drops_to_skip: usize,
+    pub(crate) live_handles: usize,
     /// List of tasks waiting for this asset to complete loading
     pub(crate) waiting_tasks: Vec<Waker>,
 }
@@ -62,7 +62,7 @@ impl AssetInfo {
             loader_dependencies: HashMap::default(),
             dependents_waiting_on_load: HashSet::default(),
             dependents_waiting_on_recursive_dep_load: HashSet::default(),
-            handle_drops_to_skip: 0,
+            live_handles: 1,
             waiting_tasks: Vec::new(),
         }
     }
@@ -244,7 +244,7 @@ impl AssetInfos {
 
                     // We must create a new strong handle for the existing id and ensure that the drop of the old
                     // strong handle doesn't remove the asset from the Assets collection
-                    info.handle_drops_to_skip += 1;
+                    info.live_handles += 1;
                     let provider = self
                         .handle_providers
                         .get(&type_id)
@@ -360,6 +360,21 @@ impl AssetInfos {
             !living.is_empty()
         } else {
             false
+        }
+    }
+
+    pub(crate) fn get_handle_count(
+        &mut self,
+        id: UntypedAssetId,
+        decrement: bool,
+    ) -> Option<usize> {
+        if let Some(info) = self.infos.get_mut(&id) {
+            if decrement {
+                info.live_handles = info.live_handles.saturating_sub(1);
+            }
+            Some(info.live_handles)
+        } else {
+            None
         }
     }
 
@@ -684,8 +699,7 @@ impl AssetInfos {
             return false;
         };
 
-        if entry.get_mut().handle_drops_to_skip > 0 {
-            entry.get_mut().handle_drops_to_skip -= 1;
+        if entry.get_mut().live_handles > 0 {
             return false;
         }
 

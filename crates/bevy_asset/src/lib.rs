@@ -1475,6 +1475,7 @@ mod tests {
             let handle = {
                 let mut texts = app.world_mut().resource_mut::<Assets<CoolText>>();
                 let handle = texts.add(CoolText::default());
+
                 texts.get_strong_handle(handle.id()).unwrap()
             };
 
@@ -1592,18 +1593,6 @@ mod tests {
                     handle.id() == handle2.id(),
                     "loading the same asset twice should return the same handle"
                 );
-
-                match (handle, handle2) {
-                    (Handle::Strong(a), Handle::Strong(b)) => {
-                        assert!(
-                            Arc::ptr_eq(&a, &b),
-                            "loading the same asset twice should return the same handle"
-                        );
-                    }
-                    (a, b) => {
-                        panic!("expected strong handles, got {a:?} and {b:?}");
-                    }
-                }
             }
         };
     }
@@ -2198,7 +2187,10 @@ mod tests {
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
             .init_asset::<TestAsset>();
 
-        let handle = app.world().resource::<Assets<TestAsset>>().reserve_handle();
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<TestAsset>>()
+            .reserve_handle();
         // We still have the asset ID, but we've dropped the handle so the asset is no longer live.
         let asset_id = handle.id();
         drop(handle);

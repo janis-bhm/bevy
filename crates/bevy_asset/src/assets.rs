@@ -291,7 +291,7 @@ pub struct Assets<A: Asset> {
     queued_events: Vec<AssetEvent<A>>,
     /// Assets managed by the `Assets` struct with live strong `Handle`s
     /// originating from `get_strong_handle`.
-    duplicate_handles: HashMap<AssetId<A>, u16>,
+    handle_counts: HashMap<AssetId<A>, u16>,
 }
 
 impl<A: Asset> Default for Assets<A> {
@@ -304,7 +304,7 @@ impl<A: Asset> Default for Assets<A> {
             handle_provider,
             hash_map: Default::default(),
             queued_events: Default::default(),
-            duplicate_handles: Default::default(),
+            handle_counts: Default::default(),
         }
     }
 }
@@ -317,8 +317,13 @@ impl<A: Asset> Assets<A> {
     }
 
     /// Reserves a new [`Handle`] for an asset that will be stored in this collection.
-    pub fn reserve_handle(&self) -> Handle<A> {
-        self.handle_provider.reserve_handle().typed::<A>()
+    pub fn reserve_handle(&mut self) -> Handle<A> {
+        let handle = self.handle_provider.reserve_handle().typed::<A>();
+        let id = handle.id();
+
+        self.handle_counts.insert(id, 1);
+
+        handle
     }
 
     /// Inserts the given `asset`, identified by the given `id`. If an asset already exists for
@@ -330,7 +335,8 @@ impl<A: Asset> Assets<A> {
         id: impl Into<AssetId<A>>,
         asset: A,
     ) -> Result<(), InvalidGenerationError> {
-        match id.into() {
+        let id = id.into();
+        match id {
             AssetId::Index { index, .. } => self.insert_with_index(index, asset).map(|_| ()),
             AssetId::Uuid { uuid } => {
                 self.insert_with_uuid(uuid, asset);
@@ -400,6 +406,7 @@ impl<A: Asset> Assets<A> {
     pub fn add(&mut self, asset: impl Into<A>) -> Handle<A> {
         let index = self.dense_storage.allocator.reserve();
         self.insert_with_index(index, asset.into()).unwrap();
+        self.handle_counts.insert(index.into(), 1);
         Handle::Strong(
             self.handle_provider
                 .get_handle(index.into(), false, None, None),
@@ -415,14 +422,20 @@ impl<A: Asset> Assets<A> {
         if !self.contains(id) {
             return None;
         }
-        *self.duplicate_handles.entry(id).or_insert(0) += 1;
-        let index = match id {
-            AssetId::Index { index, .. } => index.into(),
-            AssetId::Uuid { uuid } => uuid.into(),
-        };
-        Some(Handle::Strong(
-            self.handle_provider.get_handle(index, false, None, None),
-        ))
+
+        match id {
+            AssetId::Index { index, .. } => {
+                *self.handle_counts.entry(id).or_insert(0) += 1;
+
+                Some(Handle::Strong(self.handle_provider.get_handle(
+                    index.into(),
+                    false,
+                    None,
+                    None,
+                )))
+            }
+            AssetId::Uuid { uuid } => Some(Handle::Uuid(uuid, PhantomData)),
+        }
     }
 
     /// Retrieves a reference to the [`Asset`] with the given `id`, if it exists.
@@ -479,26 +492,36 @@ impl<A: Asset> Assets<A> {
     /// This is the same as [`Assets::remove`] except it doesn't emit [`AssetEvent::Removed`].
     pub fn remove_untracked(&mut self, id: impl Into<AssetId<A>>) -> Option<A> {
         let id: AssetId<A> = id.into();
-        self.duplicate_handles.remove(&id);
+        self.handle_counts.remove(&id);
         match id {
             AssetId::Index { index, .. } => self.dense_storage.remove_still_alive(index),
             AssetId::Uuid { uuid } => self.hash_map.remove(&uuid),
         }
     }
 
-    /// Removes the [`Asset`] with the given `id`.
-    pub(crate) fn remove_dropped(&mut self, id: AssetId<A>) {
-        match self.duplicate_handles.get_mut(&id) {
-            None => {}
+    pub(crate) fn get_handle_count(
+        &mut self,
+        id: impl Into<AssetId<A>>,
+        decrement: bool,
+    ) -> Option<u16> {
+        let id = id.into();
+        match self.handle_counts.get_mut(&id) {
             Some(0) => {
-                self.duplicate_handles.remove(&id);
+                self.handle_counts.remove(&id);
+                None
             }
-            Some(value) => {
-                *value -= 1;
-                return;
+            None => None,
+            Some(count) => {
+                if decrement {
+                    *count = count.saturating_sub(1);
+                }
+                Some(*count)
             }
         }
+    }
 
+    /// Removes the [`Asset`] with the given `id`.
+    pub(crate) fn remove_dropped(&mut self, id: AssetId<A>) {
         let existed = match id {
             AssetId::Index { index, .. } => self.dense_storage.remove_dropped(index).is_some(),
             AssetId::Uuid { uuid } => self.hash_map.remove(&uuid).is_some(),
@@ -575,18 +598,19 @@ impl<A: Asset> Assets<A> {
         let mut infos = asset_server.data.infos.write();
         while let Ok(drop_event) = assets.handle_provider.drop_receiver.try_recv() {
             let id = drop_event.id.typed();
+            let untyped_id = id.untyped();
 
-            if drop_event.asset_server_managed {
-                let untyped_id = id.untyped();
+            let server_count = infos
+                .get_handle_count(untyped_id, drop_event.asset_server_managed)
+                .and_then(core::num::NonZero::new);
+            let assets_count = assets
+                .get_handle_count(id, !drop_event.asset_server_managed)
+                .and_then(core::num::NonZero::new);
 
-                // the process_handle_drop call checks whether new handles have been created since the drop event was fired, before removing the asset
-                if !infos.process_handle_drop(untyped_id) {
-                    // a new handle has been created, or the asset doesn't exist
-                    continue;
-                }
+            if server_count.is_none() && assets_count.is_none() {
+                infos.process_handle_drop(untyped_id);
+                assets.remove_dropped(id);
             }
-
-            assets.remove_dropped(id);
         }
     }
 

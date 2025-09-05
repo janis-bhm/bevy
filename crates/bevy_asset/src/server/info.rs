@@ -347,7 +347,8 @@ impl AssetInfos {
     pub(crate) fn is_path_alive<'a>(&self, path: impl Into<AssetPath<'a>>) -> bool {
         self.get_path_ids(&path.into())
             .filter_map(|id| self.infos.get(&id))
-            .any(|info| info.weak_handle.strong_count() > 0)
+            .next()
+            .is_some()
     }
 
     /// Returns `true` if the asset at this path should be reloaded

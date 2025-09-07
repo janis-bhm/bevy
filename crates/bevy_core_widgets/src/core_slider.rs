@@ -98,6 +98,19 @@ pub struct CoreSliderThumb;
 #[component(immutable)]
 pub struct SliderValue(pub f32);
 
+impl core::fmt::Display for SliderValue {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self.0 {
+                0.0 => 0f32,
+                v => v,
+            }
+        )
+    }
+}
+
 /// A component which represents the allowed range of the slider value. Defaults to 0.0..=1.0.
 #[derive(Component, Debug, PartialEq, Clone, Copy)]
 #[component(immutable)]

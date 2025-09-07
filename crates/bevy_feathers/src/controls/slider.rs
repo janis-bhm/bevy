@@ -222,7 +222,7 @@ fn update_slider_pos(
         // Find slider text child entity and update its text with the formatted value
         q_children.iter_descendants(slider_ent).for_each(|child| {
             if let Ok(mut text) = q_slider_text.get_mut(child) {
-                text.0 = format!("{}", value.0);
+                text.0 = format!("{}", value);
             }
         });
     }

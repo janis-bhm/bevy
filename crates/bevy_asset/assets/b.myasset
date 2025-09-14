@@ -1,1 +1,1 @@
-(deps: ["d.myasset"])
+(text: None, immediate_deps: Some(["d.myasset"]), deps: [])

@@ -1580,10 +1580,7 @@ mod tests {
     use crate::tests::get;
     use crate::LoadDirectError;
     use crate::{
-        io::{
-            memory::{Dir, MemoryAssetReader},
-            Reader,
-        },
+        io::Reader,
         saver::AssetSaver,
         transformer::{AssetTransformer, TransformedAsset},
         Asset, AssetApp, AssetLoader, AssetMode, AssetPlugin, Handle, LoadContext,
@@ -1592,17 +1589,10 @@ mod tests {
     use super::*;
 
     #[derive(Asset, TypePath, Debug, Default)]
-    pub struct MyAsset {
+    pub struct ProcessedAsset {
         text: String,
         #[dependency]
-        pub deps: Vec<Handle<MyAsset>>,
-    }
-
-    #[derive(Asset, TypePath, Debug, Default)]
-    pub struct MyTransformedAsset {
-        text: String,
-        #[dependency]
-        pub deps: Vec<Handle<MyTransformedAsset>>,
+        pub deps: Vec<Handle<UnProcessedAsset>>,
     }
 
     #[derive(Error, Debug)]
@@ -1621,12 +1611,19 @@ mod tests {
 
     struct MyLoaderSettings;
 
-    pub struct MyAssetLoader {
+    pub struct ProcessedAssetLoader {
         counter: Arc<AtomicUsize>,
     }
 
-    impl AssetLoader for MyAssetLoader {
-        type Asset = MyAsset;
+    #[derive(Serialize, Deserialize)]
+    struct ProcessedAssetRon {
+        text: Option<String>,
+        immediate_deps: Option<Vec<String>>,
+        deps: Vec<String>,
+    }
+
+    impl AssetLoader for ProcessedAssetLoader {
+        type Asset = ProcessedAsset;
 
         type Settings = ();
 
@@ -1643,28 +1640,24 @@ mod tests {
                 .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
-            #[derive(Serialize, Deserialize)]
-            struct MyAssetRon {
-                embed_deps: Option<Vec<String>>,
-                deps: Vec<String>,
-            }
-            let ron: MyAssetRon = ron::de::from_bytes(&bytes)?;
+            let ron: ProcessedAssetRon = ron::de::from_bytes(&bytes)?;
             let text = {
                 let mut text = String::new();
-                if let Some(deps) = ron.embed_deps.as_ref() {
+                if let Some(deps) = ron.immediate_deps.as_ref() {
                     for dep in deps {
                         let dep = load_context
                             .loader()
                             .immediate()
-                            .load::<MyTransformedAsset>(dep)
-                            .await?;
-                        text.push_str(&dep.value.text);
+                            .load::<ProcessedAsset>(dep)
+                            .await?
+                            .take();
+                        text.push_str(&dep.text);
                     }
                 }
                 text
             };
 
-            Ok(MyAsset {
+            Ok(ProcessedAsset {
                 text,
                 deps: ron.deps.iter().map(|p| load_context.load(p)).collect(),
             })
@@ -1672,6 +1665,61 @@ mod tests {
 
         fn extensions(&self) -> &[&str] {
             &["myasset"]
+        }
+    }
+
+    #[derive(Asset, TypePath, Debug, Default)]
+    pub struct UnProcessedAsset {
+        text: String,
+    }
+    #[derive(Serialize, Deserialize)]
+    pub struct UnProcessedAssetRon {
+        text: String,
+        deps: Vec<String>,
+    }
+
+    struct UnProcessedAssetLoader {
+        counter: Arc<AtomicUsize>,
+    }
+
+    impl AssetLoader for UnProcessedAssetLoader {
+        type Asset = UnProcessedAsset;
+
+        type Settings = ();
+
+        type Error = MyAssetLoaderError;
+
+        async fn load(
+            &self,
+            reader: &mut dyn Reader,
+            _settings: &Self::Settings,
+            load_context: &mut LoadContext<'_>,
+        ) -> Result<Self::Asset, Self::Error> {
+            info!("loading unprocessed asset {:?}", load_context.path());
+            self.counter
+                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await?;
+            let ron: UnProcessedAssetRon = ron::de::from_bytes(&bytes)?;
+            let text = {
+                let mut text = ron.text;
+                for dep in &ron.deps {
+                    let dep = load_context
+                        .loader()
+                        .immediate()
+                        .load::<UnProcessedAsset>(dep)
+                        .await?
+                        .take();
+                    text.push_str(&dep.text);
+                }
+                text
+            };
+
+            Ok(UnProcessedAsset { text })
+        }
+
+        fn extensions(&self) -> &[&str] {
+            &["unprocessed"]
         }
     }
 
@@ -1685,8 +1733,8 @@ mod tests {
     }
 
     impl AssetTransformer for MyAssetTransformer {
-        type AssetInput = MyAsset;
-        type AssetOutput = MyTransformedAsset;
+        type AssetInput = ProcessedAsset;
+        type AssetOutput = ProcessedAsset;
 
         type Settings = MyAssetTransformerSettings;
 
@@ -1701,10 +1749,9 @@ mod tests {
                 .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             info!("transforming asset");
             let text = format!("{}+{}", asset.value.text, settings.text.clone());
-            let deps = asset.value.deps.iter().filter_map(|h| h.path()).map(|p| );
             Ok(TransformedAsset {
-                value: MyTransformedAsset {
-                    text: settings.text.clone(),
+                value: ProcessedAsset {
+                    text,
                     deps: asset.value.deps,
                 },
                 labeled_assets: asset.labeled_assets,
@@ -1712,56 +1759,15 @@ mod tests {
         }
     }
 
-    #[derive(Serialize, Deserialize)]
-    struct MyTransformedAssetRon {
-        text: String,
-        dependencies: Vec<String>,
-    }
-
-    struct MyTransformedAssetLoader {
+    struct MyAssetSaver {
         counter: Arc<AtomicUsize>,
     }
 
-    impl AssetLoader for MyTransformedAssetLoader {
-        type Asset = MyTransformedAsset;
-        type Settings = ();
-        type Error = MyAssetLoaderError;
-        async fn load(
-            &self,
-            reader: &mut dyn Reader,
-            _settings: &Self::Settings,
-            load_context: &mut LoadContext<'_>,
-        ) -> Result<MyTransformedAsset, Self::Error> {
-            self.counter
-                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-            info!("loading transformed asset",);
-            let mut bytes = Vec::new();
-            reader.read_to_end(&mut bytes).await?;
-            let ron: MyTransformedAssetRon = ron::de::from_bytes(&bytes)?;
-            Ok(MyTransformedAsset {
-                text: ron.text,
-                deps: ron
-                    .dependencies
-                    .iter()
-                    .map(|p| load_context.load(p))
-                    .collect(),
-            })
-        }
-
-        fn extensions(&self) -> &[&str] {
-            &["transformed"]
-        }
-    }
-
-    struct MyTransformedAssetSaver {
-        counter: Arc<AtomicUsize>,
-    }
-
-    impl AssetSaver for MyTransformedAssetSaver {
-        type Asset = MyTransformedAsset;
+    impl AssetSaver for MyAssetSaver {
+        type Asset = ProcessedAsset;
         type Settings = ();
 
-        type OutputLoader = MyTransformedAssetLoader;
+        type OutputLoader = ProcessedAssetLoader;
 
         type Error = MyAssetLoaderError;
 
@@ -1774,9 +1780,10 @@ mod tests {
             self.counter
                 .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             info!("Saving asset with {} dependencies", asset.deps.len());
-            let ron = MyTransformedAssetRon {
-                text: asset.text.clone(),
-                dependencies: asset
+            let ron = ProcessedAssetRon {
+                text: Some(asset.text.clone()),
+                immediate_deps: None,
+                deps: asset
                     .deps
                     .iter()
                     .map(|h| h.path().unwrap().to_string())
@@ -1789,29 +1796,7 @@ mod tests {
         }
     }
 
-    type MyProcessor =
-        LoadTransformAndSave<MyAssetLoader, MyAssetTransformer, MyTransformedAssetSaver>;
-
-    fn make_loaders_and_transformers() -> (
-        MyAssetLoader,
-        MyTransformedAssetLoader,
-        MyAssetTransformer,
-        Arc<AtomicUsize>,
-    ) {
-        let counter = Arc::new(AtomicUsize::new(0));
-        (
-            MyAssetLoader {
-                counter: counter.clone(),
-            },
-            MyTransformedAssetLoader {
-                counter: counter.clone(),
-            },
-            MyAssetTransformer {
-                counter: counter.clone(),
-            },
-            counter,
-        )
-    }
+    type MyProcessor = LoadTransformAndSave<ProcessedAssetLoader, MyAssetTransformer, MyAssetSaver>;
 
     #[test]
     fn it_works() {
@@ -1841,17 +1826,17 @@ mod tests {
         let (my_loader, loader_count) = {
             let counter = Arc::new(AtomicUsize::new(0));
             (
-                MyAssetLoader {
+                ProcessedAssetLoader {
                     counter: counter.clone(),
                 },
                 counter,
             )
         };
 
-        let (my_transformed_loader, transformed_loader_count) = {
+        let (my_unprocessed_loader, unprocessed_loader_count) = {
             let counter = Arc::new(AtomicUsize::new(0));
             (
-                MyTransformedAssetLoader {
+                UnProcessedAssetLoader {
                     counter: counter.clone(),
                 },
                 counter,
@@ -1871,17 +1856,17 @@ mod tests {
         let (my_saver, saver_count) = {
             let counter = Arc::new(AtomicUsize::new(0));
             (
-                MyTransformedAssetSaver {
+                MyAssetSaver {
                     counter: counter.clone(),
                 },
                 counter,
             )
         };
 
-        app.init_asset::<MyAsset>()
-            .init_asset::<MyTransformedAsset>()
+        app.init_asset::<ProcessedAsset>()
+            .init_asset::<UnProcessedAsset>()
             .register_asset_loader(my_loader)
-            .register_asset_loader(my_transformed_loader)
+            .register_asset_loader(my_unprocessed_loader)
             .register_asset_processor(MyProcessor::new(my_transformer, my_saver))
             .set_default_asset_processor::<MyProcessor>("myasset");
 
@@ -1891,10 +1876,10 @@ mod tests {
 
         let server = app.world().resource::<AssetServer>().clone();
 
-        #[derive(Resource)]
-        struct MyHandles(Handle<MyTransformedAsset>);
+        // #[derive(Resource)]
+        // struct MyHandles(Handle<()>);
 
-        let handle: Handle<MyTransformedAsset> = server.load("a.myasset");
+        let handle: Handle<ProcessedAsset> = server.load("a.myasset");
         let a_id = handle.id();
 
         // app.insert_resource(MyHandles(handle));
@@ -1904,11 +1889,17 @@ mod tests {
             eprintln!("load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}");
             Some(())
         });
-        crate::tests::run_app_until(&mut app, |world| {
-            let a = get(world, a_id)?;
-            let d_id = a.deps[0].id();
-            let (a_load, a_deps, a_rec_deps) = server.get_load_states(d_id).unwrap();
-            if !matches!(a_load, bevy_asset::LoadState::Loaded) {
+        crate::tests::run_app_until(&mut app, |_world| {
+            let (a_load, a_deps, a_rec_deps) = server.get_load_states(a_id).unwrap();
+            if !matches!(a_deps, bevy_asset::DependencyLoadState::Loaded) {
+                return None;
+            }
+            eprintln!("load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}");
+            Some(())
+        });
+        crate::tests::run_app_until(&mut app, |_world| {
+            let (a_load, a_deps, a_rec_deps) = server.get_load_states(a_id).unwrap();
+            if !matches!(a_rec_deps, bevy_asset::RecursiveDependencyLoadState::Loaded) {
                 return None;
             }
             eprintln!("load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}");
@@ -1917,12 +1908,12 @@ mod tests {
 
         eprintln!("counts:");
         eprintln!(
-            "  loader: {}",
+            "  processed_loader: {}",
             loader_count.load(core::sync::atomic::Ordering::SeqCst)
         );
         eprintln!(
-            "  transformed loader: {}",
-            transformed_loader_count.load(core::sync::atomic::Ordering::SeqCst)
+            "  unprocessed_loader: {}",
+            unprocessed_loader_count.load(core::sync::atomic::Ordering::SeqCst)
         );
         eprintln!(
             "  transformer: {}",

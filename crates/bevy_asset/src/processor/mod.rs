@@ -1563,3 +1563,279 @@ pub enum SetTransactionLogFactoryError {
     #[error("Transaction log is already in use so setting the factory does nothing")]
     AlreadyInUse,
 }
+
+#[cfg(test)]
+mod tests {
+    use core::{convert::Infallible, sync::atomic::AtomicUsize};
+    use std::eprintln;
+    use std::string::String;
+    use std::string::ToString;
+
+    use bevy_app::{App, TaskPoolPlugin};
+    use bevy_reflect::TypePath;
+    use serde::{Deserialize, Serialize};
+    use tracing::info;
+
+    use crate::tests::get;
+    use crate::{
+        io::{
+            memory::{Dir, MemoryAssetReader},
+            Reader,
+        },
+        saver::AssetSaver,
+        transformer::{AssetTransformer, TransformedAsset},
+        Asset, AssetApp, AssetLoader, AssetMode, AssetPlugin, Handle, LoadContext,
+    };
+
+    use super::*;
+
+    #[derive(Asset, TypePath, Debug, Default)]
+    pub struct MyAsset {
+        #[dependency]
+        pub deps: Vec<Handle<MyAsset>>,
+    }
+
+    #[derive(Asset, TypePath, Debug, Default)]
+    pub struct MyTransformedAsset {
+        text: String,
+        #[dependency]
+        pub deps: Vec<Handle<MyAsset>>,
+    }
+
+    #[derive(Error, Debug)]
+    pub enum MyAssetLoaderError {
+        #[error("Could not load dependency: {dependency}")]
+        CannotLoadDependency { dependency: AssetPath<'static> },
+        #[error("A RON error occurred during loading: {0}")]
+        RonSpannedError(#[from] ron::error::SpannedError),
+        #[error("A RON error occurred during saving: {0}")]
+        RonError(#[from] ron::error::Error),
+        #[error("An IO error occurred during loading: {0}")]
+        Io(#[from] std::io::Error),
+    }
+
+    struct MyLoaderSettings {
+        counter: Arc<AtomicUsize>,
+    }
+
+    pub struct MyAssetLoader {
+        counter: Arc<AtomicUsize>,
+    }
+
+    impl AssetLoader for MyAssetLoader {
+        type Asset = MyAsset;
+
+        type Settings = ();
+
+        type Error = MyAssetLoaderError;
+
+        async fn load(
+            &self,
+            reader: &mut dyn Reader,
+            _settings: &Self::Settings,
+            load_context: &mut LoadContext<'_>,
+        ) -> Result<Self::Asset, Self::Error> {
+            info!("loading asset {:?}", load_context.path());
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await?;
+            #[derive(Serialize, Deserialize)]
+            struct MyAssetRon {
+                deps: Vec<String>,
+            }
+            let ron: MyAssetRon = ron::de::from_bytes(&bytes)?;
+            Ok(MyAsset {
+                deps: ron.deps.iter().map(|p| load_context.load(p)).collect(),
+            })
+        }
+
+        fn extensions(&self) -> &[&str] {
+            &["myasset"]
+        }
+    }
+
+    struct MyAssetTransformer {
+        counter: Arc<AtomicUsize>,
+    }
+
+    #[derive(Default, Serialize, Deserialize)]
+    struct MyAssetTransformerSettings {
+        text: String,
+    }
+
+    impl AssetTransformer for MyAssetTransformer {
+        type AssetInput = MyAsset;
+        type AssetOutput = MyTransformedAsset;
+
+        type Settings = MyAssetTransformerSettings;
+
+        type Error = Infallible;
+
+        async fn transform<'a>(
+            &'a self,
+            asset: TransformedAsset<Self::AssetInput>,
+            settings: &'a Self::Settings,
+        ) -> Result<TransformedAsset<Self::AssetOutput>, Self::Error> {
+            info!("transforming asset");
+            Ok(TransformedAsset {
+                value: MyTransformedAsset {
+                    text: settings.text.clone(),
+                    deps: asset.value.deps,
+                },
+                labeled_assets: asset.labeled_assets,
+            })
+        }
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct MyTransformedAssetRon {
+        text: String,
+        dependencies: Vec<String>,
+    }
+
+    struct MyTransformedAssetLoader {
+        counter: Arc<AtomicUsize>,
+    }
+
+    impl AssetLoader for MyTransformedAssetLoader {
+        type Asset = MyTransformedAsset;
+        type Settings = ();
+        type Error = MyAssetLoaderError;
+        async fn load(
+            &self,
+            reader: &mut dyn Reader,
+            _settings: &Self::Settings,
+            load_context: &mut LoadContext<'_>,
+        ) -> Result<MyTransformedAsset, Self::Error> {
+            info!("loading transformed asset",);
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await?;
+            let ron: MyTransformedAssetRon = ron::de::from_bytes(&bytes)?;
+            Ok(MyTransformedAsset {
+                text: ron.text,
+                deps: ron
+                    .dependencies
+                    .iter()
+                    .map(|p| load_context.load(p))
+                    .collect(),
+            })
+        }
+
+        fn extensions(&self) -> &[&str] {
+            &["transformed"]
+        }
+    }
+
+    struct MyTransformedAssetSaver;
+
+    impl AssetSaver for MyTransformedAssetSaver {
+        type Asset = MyTransformedAsset;
+        type Settings = ();
+
+        type OutputLoader = MyTransformedAssetLoader;
+
+        type Error = MyAssetLoaderError;
+
+        async fn save(
+            &self,
+            writer: &mut crate::io::Writer,
+            asset: crate::saver::SavedAsset<'_, Self::Asset>,
+            _settings: &Self::Settings,
+        ) -> Result<<Self::OutputLoader as AssetLoader>::Settings, Self::Error> {
+            info!("Saving asset with {} dependencies", asset.deps.len());
+            let ron = MyTransformedAssetRon {
+                text: asset.text.clone(),
+                dependencies: asset
+                    .deps
+                    .iter()
+                    .map(|h| h.path().unwrap().to_string())
+                    .collect(),
+            };
+            let mut bytes = String::new();
+            ron::ser::to_writer(&mut bytes, &ron)?;
+            writer.write_all(bytes.as_bytes()).await?;
+            Ok(())
+        }
+    }
+
+    type MyProcessor =
+        LoadTransformAndSave<MyAssetLoader, MyAssetTransformer, MyTransformedAssetSaver>;
+
+    fn make_loaders_and_transformers() -> (
+        MyAssetLoader,
+        MyTransformedAssetLoader,
+        MyAssetTransformer,
+        Arc<AtomicUsize>,
+    ) {
+        let counter = Arc::new(AtomicUsize::new(0));
+        (
+            MyAssetLoader {
+                counter: counter.clone(),
+            },
+            MyTransformedAssetLoader {
+                counter: counter.clone(),
+            },
+            MyAssetTransformer {
+                counter: counter.clone(),
+            },
+            counter,
+        )
+    }
+
+    #[test]
+    fn it_works() {
+        // let a_path = "a.myasset";
+        // let a = r#"(deps: ["b.myasset", "c.myasset"])"#;
+
+        // let b_path = "b.myasset";
+        // let b = r#"(deps: ["d.myasset"])"#;
+        // let c_path = "c.myasset";
+        // let c = r#"(deps: [])"#;
+        // let d_path = "d.myasset";
+        // let d = r#"(deps: [])"#;
+
+        let mut app = {
+            let mut app = App::new();
+            app.add_plugins((
+                TaskPoolPlugin::default(),
+                bevy_log::LogPlugin::default(),
+                AssetPlugin {
+                    mode: AssetMode::Processed,
+                    ..Default::default()
+                },
+            ));
+            app
+        };
+
+        let (my_loader, my_transformed_loader, my_transformer, _counter) =
+            make_loaders_and_transformers();
+
+        app.init_asset::<MyAsset>()
+            .init_asset::<MyTransformedAsset>()
+            .register_asset_loader(my_loader)
+            .register_asset_loader(my_transformed_loader)
+            .register_asset_processor(MyProcessor::new(my_transformer, MyTransformedAssetSaver))
+            .set_default_asset_processor::<MyProcessor>("myasset");
+
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let server = app.world().resource::<AssetServer>().clone();
+
+        #[derive(Resource)]
+        struct MyHandles(Handle<MyTransformedAsset>);
+
+        let handle: Handle<MyTransformedAsset> = server.load("a.myasset");
+        let a_id = handle.id();
+
+        // app.insert_resource(MyHandles(handle));
+        crate::tests::run_app_until(&mut app, |world| {
+            let a = get(world, a_id)?;
+            let (a_load, a_deps, a_rec_deps) = server.get_load_states(a_id).unwrap();
+            eprintln!(
+                "handle a: {a:?}, load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}"
+            );
+            Some(())
+        });
+    }
+}

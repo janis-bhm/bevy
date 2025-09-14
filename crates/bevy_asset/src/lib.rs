@@ -906,7 +906,7 @@ mod tests {
         }
     }
 
-    fn test_app(dir: Dir) -> (App, GateOpener) {
+    pub(crate) fn test_app(dir: Dir) -> (App, GateOpener) {
         let mut app = App::new();
         let (gated_memory_reader, gate_opener) = GatedReader::new(MemoryAssetReader { root: dir });
         app.register_asset_source(
@@ -930,7 +930,7 @@ mod tests {
 
     const LARGE_ITERATION_COUNT: usize = 10000;
 
-    fn get<A: Asset>(world: &World, id: AssetId<A>) -> Option<&A> {
+    pub(crate) fn get<A: Asset>(world: &World, id: AssetId<A>) -> Option<&A> {
         world.resource::<Assets<A>>().get(id)
     }
 

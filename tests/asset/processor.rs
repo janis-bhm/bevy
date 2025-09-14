@@ -66,10 +66,11 @@ impl AssetLoader for ProcessedAssetLoader {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let ron: ProcessedAssetRon = ron::de::from_bytes(&bytes)?;
-        let text = {
+        let (text, mut deps) = {
             let mut text = String::new();
-            if let Some(deps) = ron.immediate_deps.as_ref() {
-                for dep in deps {
+            let mut deps = Vec::new();
+            if let Some(imm_deps) = ron.immediate_deps.as_ref() {
+                for dep in imm_deps {
                     let dep = load_context
                         .loader()
                         .immediate()
@@ -77,15 +78,14 @@ impl AssetLoader for ProcessedAssetLoader {
                         .await?
                         .take();
                     text.push_str(&dep.text);
+                    deps.extend(dep.deps);
                 }
             }
-            text
+            (text, deps)
         };
+        deps.extend(ron.deps.iter().map(|p| load_context.load(p)));
 
-        Ok(ProcessedAsset {
-            text,
-            deps: ron.deps.iter().map(|p| load_context.load(p)).collect(),
-        })
+        Ok(ProcessedAsset { text, deps })
     }
 
     fn extensions(&self) -> &[&str] {
@@ -217,7 +217,7 @@ impl AssetSaver for MyAssetSaver {
 
 type MyProcessor = LoadTransformAndSave<ProcessedAssetLoader, MyAssetTransformer, MyAssetSaver>;
 
-pub fn run_app_until(app: &mut App, mut predicate: impl FnMut(&mut World) -> Option<()>) {
+fn run_app_until(app: &mut App, mut predicate: impl FnMut(&mut World) -> Option<()>) {
     for _ in 0..LARGE_ITERATION_COUNT {
         app.update();
         if predicate(app.world_mut()).is_some() {
@@ -235,6 +235,8 @@ pub(crate) fn get<A: Asset>(world: &World, id: AssetId<A>) -> Option<&A> {
 }
 
 fn main() {
+    std::fs::remove_dir_all("tests/asset/processed").ok();
+
     let mut app = {
         let mut app = App::new();
         app.add_plugins((

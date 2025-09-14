@@ -3905,6 +3905,15 @@ doc-scrape-examples = true
 [package.metadata.example.ambiguity_detection]
 hidden = true
 
+
+[[example]]
+name = "asset_processor"
+path = "tests/asset/processor.rs"
+doc-scrape-examples = false
+
+[package.metadata.example.asset_processor]
+hidden = true
+
 [[example]]
 name = "resizing"
 path = "tests/window/resizing.rs"

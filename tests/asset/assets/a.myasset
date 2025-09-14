@@ -1,0 +1,1 @@
+(text: None, deps: [ "a.unprocessed", "b.unprocessed"], immediate_deps: Some(["d.myasset", "c.myasset"]))

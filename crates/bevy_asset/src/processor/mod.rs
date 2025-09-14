@@ -1568,6 +1568,7 @@ pub enum SetTransactionLogFactoryError {
 mod tests {
     use core::{convert::Infallible, sync::atomic::AtomicUsize};
     use std::eprintln;
+    use std::format;
     use std::string::String;
     use std::string::ToString;
 
@@ -1577,6 +1578,7 @@ mod tests {
     use tracing::info;
 
     use crate::tests::get;
+    use crate::LoadDirectError;
     use crate::{
         io::{
             memory::{Dir, MemoryAssetReader},
@@ -1591,6 +1593,7 @@ mod tests {
 
     #[derive(Asset, TypePath, Debug, Default)]
     pub struct MyAsset {
+        text: String,
         #[dependency]
         pub deps: Vec<Handle<MyAsset>>,
     }
@@ -1599,7 +1602,7 @@ mod tests {
     pub struct MyTransformedAsset {
         text: String,
         #[dependency]
-        pub deps: Vec<Handle<MyAsset>>,
+        pub deps: Vec<Handle<MyTransformedAsset>>,
     }
 
     #[derive(Error, Debug)]
@@ -1612,11 +1615,11 @@ mod tests {
         RonError(#[from] ron::error::Error),
         #[error("An IO error occurred during loading: {0}")]
         Io(#[from] std::io::Error),
+        #[error("An error occurred during loading: {0}")]
+        LoadDirectError(#[from] LoadDirectError),
     }
 
-    struct MyLoaderSettings {
-        counter: Arc<AtomicUsize>,
-    }
+    struct MyLoaderSettings;
 
     pub struct MyAssetLoader {
         counter: Arc<AtomicUsize>,
@@ -1635,15 +1638,34 @@ mod tests {
             _settings: &Self::Settings,
             load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
-            info!("loading asset {:?}", load_context.path());
+            info!("loading asset");
+            self.counter
+                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
             #[derive(Serialize, Deserialize)]
             struct MyAssetRon {
+                embed_deps: Option<Vec<String>>,
                 deps: Vec<String>,
             }
             let ron: MyAssetRon = ron::de::from_bytes(&bytes)?;
+            let text = {
+                let mut text = String::new();
+                if let Some(deps) = ron.embed_deps.as_ref() {
+                    for dep in deps {
+                        let dep = load_context
+                            .loader()
+                            .immediate()
+                            .load::<MyTransformedAsset>(dep)
+                            .await?;
+                        text.push_str(&dep.value.text);
+                    }
+                }
+                text
+            };
+
             Ok(MyAsset {
+                text,
                 deps: ron.deps.iter().map(|p| load_context.load(p)).collect(),
             })
         }
@@ -1675,7 +1697,11 @@ mod tests {
             asset: TransformedAsset<Self::AssetInput>,
             settings: &'a Self::Settings,
         ) -> Result<TransformedAsset<Self::AssetOutput>, Self::Error> {
+            self.counter
+                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             info!("transforming asset");
+            let text = format!("{}+{}", asset.value.text, settings.text.clone());
+            let deps = asset.value.deps.iter().filter_map(|h| h.path()).map(|p| );
             Ok(TransformedAsset {
                 value: MyTransformedAsset {
                     text: settings.text.clone(),
@@ -1706,6 +1732,8 @@ mod tests {
             _settings: &Self::Settings,
             load_context: &mut LoadContext<'_>,
         ) -> Result<MyTransformedAsset, Self::Error> {
+            self.counter
+                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             info!("loading transformed asset",);
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
@@ -1725,7 +1753,9 @@ mod tests {
         }
     }
 
-    struct MyTransformedAssetSaver;
+    struct MyTransformedAssetSaver {
+        counter: Arc<AtomicUsize>,
+    }
 
     impl AssetSaver for MyTransformedAssetSaver {
         type Asset = MyTransformedAsset;
@@ -1741,6 +1771,8 @@ mod tests {
             asset: crate::saver::SavedAsset<'_, Self::Asset>,
             _settings: &Self::Settings,
         ) -> Result<<Self::OutputLoader as AssetLoader>::Settings, Self::Error> {
+            self.counter
+                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             info!("Saving asset with {} dependencies", asset.deps.len());
             let ron = MyTransformedAssetRon {
                 text: asset.text.clone(),
@@ -1806,14 +1838,51 @@ mod tests {
             app
         };
 
-        let (my_loader, my_transformed_loader, my_transformer, _counter) =
-            make_loaders_and_transformers();
+        let (my_loader, loader_count) = {
+            let counter = Arc::new(AtomicUsize::new(0));
+            (
+                MyAssetLoader {
+                    counter: counter.clone(),
+                },
+                counter,
+            )
+        };
+
+        let (my_transformed_loader, transformed_loader_count) = {
+            let counter = Arc::new(AtomicUsize::new(0));
+            (
+                MyTransformedAssetLoader {
+                    counter: counter.clone(),
+                },
+                counter,
+            )
+        };
+
+        let (my_transformer, transformer_count) = {
+            let counter = Arc::new(AtomicUsize::new(0));
+            (
+                MyAssetTransformer {
+                    counter: counter.clone(),
+                },
+                counter,
+            )
+        };
+
+        let (my_saver, saver_count) = {
+            let counter = Arc::new(AtomicUsize::new(0));
+            (
+                MyTransformedAssetSaver {
+                    counter: counter.clone(),
+                },
+                counter,
+            )
+        };
 
         app.init_asset::<MyAsset>()
             .init_asset::<MyTransformedAsset>()
             .register_asset_loader(my_loader)
             .register_asset_loader(my_transformed_loader)
-            .register_asset_processor(MyProcessor::new(my_transformer, MyTransformedAssetSaver))
+            .register_asset_processor(MyProcessor::new(my_transformer, my_saver))
             .set_default_asset_processor::<MyProcessor>("myasset");
 
         app.finish();
@@ -1830,12 +1899,38 @@ mod tests {
 
         // app.insert_resource(MyHandles(handle));
         crate::tests::run_app_until(&mut app, |world| {
-            let a = get(world, a_id)?;
+            let _a = get(world, a_id)?;
             let (a_load, a_deps, a_rec_deps) = server.get_load_states(a_id).unwrap();
-            eprintln!(
-                "handle a: {a:?}, load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}"
-            );
+            eprintln!("load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}");
             Some(())
         });
+        crate::tests::run_app_until(&mut app, |world| {
+            let a = get(world, a_id)?;
+            let d_id = a.deps[0].id();
+            let (a_load, a_deps, a_rec_deps) = server.get_load_states(d_id).unwrap();
+            if !matches!(a_load, bevy_asset::LoadState::Loaded) {
+                return None;
+            }
+            eprintln!("load: {a_load:?}, deps: {a_deps:?}, rec_deps: {a_rec_deps:?}");
+            Some(())
+        });
+
+        eprintln!("counts:");
+        eprintln!(
+            "  loader: {}",
+            loader_count.load(core::sync::atomic::Ordering::SeqCst)
+        );
+        eprintln!(
+            "  transformed loader: {}",
+            transformed_loader_count.load(core::sync::atomic::Ordering::SeqCst)
+        );
+        eprintln!(
+            "  transformer: {}",
+            transformer_count.load(core::sync::atomic::Ordering::SeqCst)
+        );
+        eprintln!(
+            "  saver: {}",
+            saver_count.load(core::sync::atomic::Ordering::SeqCst)
+        );
     }
 }

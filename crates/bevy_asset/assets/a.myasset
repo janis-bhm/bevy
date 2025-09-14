@@ -1,0 +1,1 @@
+(embed_deps: Some([ "b.myasset"]), deps: ["d.myasset", "c.myasset"])

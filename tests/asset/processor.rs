@@ -1,6 +1,9 @@
 use std::{
     convert::Infallible,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use bevy::prelude::*;
@@ -61,8 +64,7 @@ impl AssetLoader for ProcessedAssetLoader {
         _settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
-        self.counter
-            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        self.counter.fetch_add(1, Ordering::SeqCst);
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let ron: ProcessedAssetRon = ron::de::from_bytes(&bytes)?;
@@ -120,8 +122,7 @@ impl AssetLoader for UnProcessedAssetLoader {
         _settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
-        self.counter
-            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        self.counter.fetch_add(1, Ordering::SeqCst);
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let ron: UnProcessedAssetRon = ron::de::from_bytes(&bytes)?;
@@ -169,8 +170,7 @@ impl AssetTransformer for MyAssetTransformer {
         mut asset: TransformedAsset<Self::AssetInput>,
         settings: &'a Self::Settings,
     ) -> Result<TransformedAsset<Self::AssetOutput>, Self::Error> {
-        self.counter
-            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        self.counter.fetch_add(1, Ordering::SeqCst);
         let text = format!("{}+{}", asset.get().text, settings.text.clone());
 
         asset.get_mut().text = text;
@@ -197,8 +197,7 @@ impl AssetSaver for MyAssetSaver {
         asset: bevy_asset::saver::SavedAsset<'_, Self::Asset>,
         _settings: &Self::Settings,
     ) -> Result<<Self::OutputLoader as AssetLoader>::Settings, Self::Error> {
-        self.counter
-            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        self.counter.fetch_add(1, Ordering::SeqCst);
         let ron = ProcessedAssetRon {
             text: Some(asset.text.clone()),
             immediate_deps: None,
@@ -309,21 +308,15 @@ fn main() {
             .wait_until_finished(),
     );
 
-    assert_eq!(loader_count.load(core::sync::atomic::Ordering::SeqCst), 7);
-    assert_eq!(
-        unprocessed_loader_count.load(core::sync::atomic::Ordering::SeqCst),
-        0
-    );
-    assert_eq!(
-        transformer_count.load(core::sync::atomic::Ordering::SeqCst),
-        4
-    );
-    assert_eq!(saver_count.load(core::sync::atomic::Ordering::SeqCst), 4);
+    assert_eq!(loader_count.load(Ordering::SeqCst), 7);
+    assert_eq!(unprocessed_loader_count.load(Ordering::SeqCst), 0);
+    assert_eq!(transformer_count.load(Ordering::SeqCst), 4);
+    assert_eq!(saver_count.load(Ordering::SeqCst), 4);
 
-    loader_count.store(0, core::sync::atomic::Ordering::SeqCst);
-    unprocessed_loader_count.store(0, core::sync::atomic::Ordering::SeqCst);
-    transformer_count.store(0, core::sync::atomic::Ordering::SeqCst);
-    saver_count.store(0, core::sync::atomic::Ordering::SeqCst);
+    loader_count.store(0, Ordering::SeqCst);
+    unprocessed_loader_count.store(0, Ordering::SeqCst);
+    transformer_count.store(0, Ordering::SeqCst);
+    saver_count.store(0, Ordering::SeqCst);
 
     let server = app.world().resource::<AssetServer>().clone();
     let handle: Handle<ProcessedAsset> = server.load("a.myasset");
@@ -346,14 +339,8 @@ fn main() {
         Some(())
     });
 
-    assert_eq!(loader_count.load(core::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(
-        unprocessed_loader_count.load(core::sync::atomic::Ordering::SeqCst),
-        2
-    );
-    assert_eq!(
-        transformer_count.load(core::sync::atomic::Ordering::SeqCst),
-        0
-    );
-    assert_eq!(saver_count.load(core::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(loader_count.load(Ordering::SeqCst), 1);
+    assert_eq!(unprocessed_loader_count.load(Ordering::SeqCst), 2);
+    assert_eq!(transformer_count.load(Ordering::SeqCst), 0);
+    assert_eq!(saver_count.load(Ordering::SeqCst), 0);
 }

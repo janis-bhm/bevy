@@ -1,7 +1,15 @@
 use alloc::alloc::handle_alloc_error;
 use bevy_ptr::{OwningPtr, Ptr, PtrMut};
 use bevy_utils::OnDrop;
-use core::{alloc::Layout, cell::UnsafeCell, num::NonZero, ptr::NonNull};
+use core::{
+    alloc::Layout,
+    cell::UnsafeCell,
+    mem::ManuallyDrop,
+    num::NonZero,
+    ops::{Bound, Range, RangeBounds},
+    ptr::NonNull,
+    slice,
+};
 
 /// A flat, type-erased data storage type
 ///
@@ -398,17 +406,184 @@ impl BlobVec {
             }
         }
     }
-}
 
-impl Drop for BlobVec {
-    fn drop(&mut self) {
-        self.clear();
+    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> BlobVecDrain<'_> {
+        let size = self.item_layout.size();
+
+        let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match bound {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => {
+                if start {
+                    n.checked_add(1).expect("range end overflow")
+                } else {
+                    n.checked_sub(1).expect("range start underflow")
+                }
+            }
+            Bound::Unbounded => or,
+        };
+
+        let Range { start, end } = {
+            map_bound_or(range.start_bound(), 0, true)
+                ..map_bound_or(range.end_bound(), self.len, false)
+        };
+
+        let iter = BlobVecIter {
+            // SAFETY: TODO
+            start: unsafe { self.data.byte_add(start * size) },
+            len: end - start,
+            layout: self.item_layout,
+            _marker: core::marker::PhantomData,
+        };
+
+        BlobVecDrain {
+            tail_len: self.len - end,
+            tail_start: end,
+            iter,
+            blob: NonNull::from(self),
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    /// Drops the `BlobVec` without dropping any of its elements.
+    pub fn forget(self) {
+        let mut this = ManuallyDrop::new(self);
+
+        // SAFETY: `this` will not be used again and won't be dropped, so we can safely deallocate its memory.
+        unsafe {
+            this.dealloc();
+        }
+    }
+
+    /// Deallocates the memory used by the `BlobVec`. This doesn't call `drop` on any of the elements.
+    ///
+    /// # Safety
+    /// The caller must ensure that the `BlobVec` is no longer used after this call.
+    unsafe fn dealloc(&mut self) {
         let array_layout =
             array_layout(&self.item_layout, self.capacity).expect("array layout should be valid");
         if array_layout.size() > 0 {
             // SAFETY: data ptr layout is correct, swap_scratch ptr layout is correct
             unsafe {
                 alloc::alloc::dealloc(self.get_ptr_mut().as_ptr(), array_layout);
+            }
+        }
+    }
+}
+
+impl Drop for BlobVec {
+    fn drop(&mut self) {
+        self.clear();
+        // SAFETY: `this` will not be used again and won't be dropped, so we can safely deallocate its memory.
+        unsafe {
+            self.dealloc();
+        }
+    }
+}
+
+struct BlobVecIter<'a> {
+    start: NonNull<u8>,
+    len: usize,
+    layout: Layout,
+    _marker: core::marker::PhantomData<&'a mut BlobVec>,
+}
+
+impl<'a> Iterator for BlobVecIter<'a> {
+    type Item = PtrMut<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        // SAFETY: TODO
+        let item = unsafe {
+            self.start = self.start.byte_add(self.layout.size());
+            self.len -= 1;
+            PtrMut::new(self.start)
+        };
+
+        Some(item)
+    }
+}
+
+impl<'a> Default for BlobVecIter<'a> {
+    fn default() -> Self {
+        BlobVecIter {
+            start: NonNull::dangling(),
+            len: 0,
+            layout: Layout::new::<()>(),
+            _marker: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for BlobVecIter<'a> {
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+pub struct BlobVecDrain<'a> {
+    tail_len: usize,
+    tail_start: usize,
+    iter: BlobVecIter<'a>,
+    blob: NonNull<BlobVec>,
+    _phantom: core::marker::PhantomData<&'a mut BlobVec>,
+}
+
+impl<'a> Drop for BlobVecDrain<'a> {
+    fn drop(&mut self) {
+        struct DropGuard<'a, 'b>(&'a mut BlobVecDrain<'b>);
+        impl<'a, 'b> Drop for DropGuard<'a, 'b> {
+            fn drop(&mut self) {
+                if self.0.tail_len > 0 {
+                    // SAFETY: TODO
+                    let blob = unsafe { self.0.blob.as_mut() };
+                    let size = blob.item_layout.size();
+                    let start = blob.len();
+                    let tail = self.0.tail_start;
+
+                    // memmove the tail to its new location
+                    if tail != start {
+                        // SAFETY: TODO
+                        unsafe {
+                            let src = blob.data.byte_add(size * tail);
+                            let dst = blob.data.byte_add(size * start);
+                            src.copy_to_nonoverlapping(dst, size * self.0.tail_len);
+                        }
+                    }
+
+                    blob.len += self.0.tail_len;
+                }
+            }
+        }
+
+        let iter = core::mem::take(&mut self.iter);
+        let mut blob = self.blob;
+        let layout = iter.layout;
+
+        if layout.size() == 0 {
+            // ZSTs require no moving around, so we can just add the length of the tail to `len`.
+            // SAFETY: TODO
+            unsafe {
+                blob.as_mut().len += self.tail_len;
+            }
+            return;
+        }
+
+        // SAFETY: TODO
+        let drop = unsafe { blob.as_ref().drop };
+
+        let _guard = DropGuard(self);
+
+        if iter.len() == 0 {
+            return;
+        }
+
+        if let Some(drop) = drop {
+            for item in iter {
+                // SAFETY: TODO
+                unsafe { drop(item.promote()) };
             }
         }
     }

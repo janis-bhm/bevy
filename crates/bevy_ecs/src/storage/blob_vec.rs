@@ -427,16 +427,21 @@ impl BlobVec {
                 ..map_bound_or(range.end_bound(), self.len, false)
         };
 
+        let len = end - start;
+        let tail_len = self.len - end;
+        // adjust len before creating the drain for unwind safety
+        self.len -= len;
+
         let iter = BlobVecIter {
             // SAFETY: TODO
             start: unsafe { self.data.byte_add(start * size) },
-            len: end - start,
+            len,
             layout: self.item_layout,
             _marker: core::marker::PhantomData,
         };
 
         BlobVecDrain {
-            tail_len: self.len - end,
+            tail_len,
             tail_start: end,
             iter,
             drop: self.drop,

@@ -232,7 +232,7 @@ impl BlobVec {
             drop(old_value);
 
             // If the above code does not panic, make sure that `value` doesn't get dropped.
-            core::mem::forget(on_unwind);
+            mem::forget(on_unwind);
 
             // Make the vector's contents observable again, since panics are no longer possible.
             self.len = old_len;
@@ -409,16 +409,12 @@ impl BlobVec {
     pub fn drain(&mut self, range: impl RangeBounds<usize>) -> BlobDrain<'_, Self> {
         let size = self.item_layout.size();
 
-        let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match bound {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => {
-                if start {
-                    n.checked_add(1).expect("range end overflow")
-                } else {
-                    n.checked_sub(1).expect("range start underflow")
-                }
-            }
-            Bound::Unbounded => or,
+        let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match (bound, start) {
+            (Bound::Included(&n), true) => n,
+            (Bound::Included(&n), false) => n.checked_add(1).expect("range end overflow"),
+            (Bound::Excluded(&n), true) => n.checked_add(1).expect("range start overflow"),
+            (Bound::Excluded(&n), false) => n,
+            (Bound::Unbounded, _) => or,
         };
 
         let Range { start, end } = {
@@ -428,10 +424,13 @@ impl BlobVec {
 
         let len = end - start;
         let tail_len = self.len - end;
+
+        // adjust len before creating the drain for unwind safety
+        // if a panic occurs before the drain drop impl corrects the length, the
+        // tail will be forgotten.
+        self.len = start;
         // SAFETY: TODO
         let start = unsafe { self.data.byte_add(start * size) };
-        // adjust len before creating the drain for unwind safety
-        self.len -= len;
 
         let iter = BlobIter {
             // SAFETY: TODO
@@ -505,13 +504,13 @@ impl<'a, Blob> Iterator for BlobIter<'a, Blob> {
         }
 
         // SAFETY: TODO
-        let item = unsafe {
+        unsafe {
+            let item = PtrMut::new(self.start);
+
             self.start = self.start.byte_add(self.layout.size());
             self.len -= 1;
-            PtrMut::new(self.start)
-        };
-
-        Some(item)
+            Some(item)
+        }
     }
 }
 
@@ -831,10 +830,42 @@ mod tests {
 
                 foo2.a = 8;
                 assert_eq!(get_mut::<Foo>(&mut blob_vec, 0), &foo2);
+
+                push::<Foo>(
+                    &mut blob_vec,
+                    Foo {
+                        a: 10,
+                        b: "2".to_string(),
+                        drop_counter: drop_counter.clone(),
+                    },
+                );
+                push::<Foo>(
+                    &mut blob_vec,
+                    Foo {
+                        a: 11,
+                        b: "3".to_string(),
+                        drop_counter: drop_counter.clone(),
+                    },
+                );
+                push::<Foo>(
+                    &mut blob_vec,
+                    Foo {
+                        a: 12,
+                        b: "4".to_string(),
+                        drop_counter: drop_counter.clone(),
+                    },
+                );
+                assert_eq!(blob_vec.len(), 4);
+                assert_eq!(blob_vec.capacity, 4);
+
+                blob_vec.drain(1..3);
+                assert_eq!(blob_vec.len(), 2);
+                assert_eq!(blob_vec.capacity, 4);
+                assert_eq!(get_mut::<Foo>(&mut blob_vec, 1).a, 12);
             }
         }
 
-        assert_eq!(*drop_counter.borrow(), 6);
+        assert_eq!(*drop_counter.borrow(), 9);
     }
 
     #[test]

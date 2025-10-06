@@ -439,6 +439,7 @@ impl BlobVec {
             tail_len: self.len - end,
             tail_start: end,
             iter,
+            drop: self.drop,
             blob: NonNull::from(self),
             _phantom: core::marker::PhantomData,
         }
@@ -528,6 +529,7 @@ pub struct BlobVecDrain<'a> {
     tail_start: usize,
     iter: BlobVecIter<'a>,
     blob: NonNull<BlobVec>,
+    drop: Option<unsafe fn(OwningPtr<'_>)>,
     _phantom: core::marker::PhantomData<&'a mut BlobVec>,
 }
 
@@ -571,8 +573,7 @@ impl<'a> Drop for BlobVecDrain<'a> {
             return;
         }
 
-        // SAFETY: TODO
-        let drop = unsafe { blob.as_ref().drop };
+        let drop = self.drop;
 
         let _guard = DropGuard(self);
 

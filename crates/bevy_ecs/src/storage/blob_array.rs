@@ -1,9 +1,15 @@
 use super::blob_vec::array_layout;
-use crate::storage::blob_vec::array_layout_unchecked;
+use crate::storage::blob_vec::{array_layout_unchecked, BlobDrain, BlobIter};
 use alloc::alloc::handle_alloc_error;
 use bevy_ptr::{OwningPtr, Ptr, PtrMut};
 use bevy_utils::OnDrop;
-use core::{alloc::Layout, cell::UnsafeCell, num::NonZeroUsize, ptr::NonNull};
+use core::{
+    alloc::Layout,
+    cell::UnsafeCell,
+    num::NonZeroUsize,
+    ops::{Bound, Range, RangeBounds},
+    ptr::NonNull,
+};
 
 /// A flat, type-erased data storage type similar to a [`BlobVec`](super::blob_vec::BlobVec), but with the length and capacity cut out
 /// for performance reasons. This type is reliant on its owning type to store the capacity and length information.
@@ -201,6 +207,69 @@ impl BlobArray {
             {
                 self.capacity = 0;
             }
+        }
+    }
+
+    pub unsafe fn drop_forget_contents(&mut self, cap: usize) {
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(self.capacity, cap);
+        if cap != 0 {
+            if !self.is_zst() {
+                let layout =
+                    array_layout(&self.item_layout, cap).expect("array layout should be valid");
+                alloc::alloc::dealloc(self.data.as_ptr().cast(), layout);
+            }
+            #[cfg(debug_assertions)]
+            {
+                self.capacity = 0;
+            }
+        }
+    }
+
+    pub unsafe fn drain(
+        &mut self,
+        len: usize,
+        range: impl RangeBounds<usize>,
+    ) -> BlobDrain<'_, Self> {
+        let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match bound {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => {
+                if start {
+                    n.checked_add(1).expect("range end overflow")
+                } else {
+                    n.checked_sub(1).expect("range start underflow")
+                }
+            }
+            Bound::Unbounded => or,
+        };
+
+        let Range { start, end } = {
+            map_bound_or(range.start_bound(), 0, true)..map_bound_or(range.end_bound(), len, false)
+        };
+
+        let tail_len = len - end;
+        let len = end - start;
+
+        let size = self.item_layout.size();
+        // SAFETY: TODO
+        let start = unsafe { self.data.byte_add(start * size) };
+
+        let iter = BlobIter {
+            // SAFETY: TODO
+            start,
+            len,
+            layout: self.item_layout,
+            _marker: core::marker::PhantomData,
+        };
+
+        BlobDrain {
+            tail_len,
+            tail_offset: len,
+            iter,
+            drop: self.drop,
+            start_ptr: start,
+            len_ptr: None,
+            _phantom: core::marker::PhantomData,
         }
     }
 

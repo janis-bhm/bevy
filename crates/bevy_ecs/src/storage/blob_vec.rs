@@ -4,11 +4,10 @@ use bevy_utils::OnDrop;
 use core::{
     alloc::Layout,
     cell::UnsafeCell,
-    mem::ManuallyDrop,
+    mem::{self, ManuallyDrop},
     num::NonZero,
     ops::{Bound, Range, RangeBounds},
     ptr::NonNull,
-    slice,
 };
 
 /// A flat, type-erased data storage type
@@ -407,7 +406,7 @@ impl BlobVec {
         }
     }
 
-    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> BlobVecDrain<'_> {
+    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> BlobDrain<'_, Self> {
         let size = self.item_layout.size();
 
         let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match bound {
@@ -429,29 +428,32 @@ impl BlobVec {
 
         let len = end - start;
         let tail_len = self.len - end;
+        // SAFETY: TODO
+        let start = unsafe { self.data.byte_add(start * size) };
         // adjust len before creating the drain for unwind safety
         self.len -= len;
 
-        let iter = BlobVecIter {
+        let iter = BlobIter {
             // SAFETY: TODO
-            start: unsafe { self.data.byte_add(start * size) },
+            start,
             len,
             layout: self.item_layout,
             _marker: core::marker::PhantomData,
         };
 
-        BlobVecDrain {
+        BlobDrain {
             tail_len,
-            tail_start: end,
+            tail_offset: len,
             iter,
             drop: self.drop,
-            blob: NonNull::from(self),
+            start_ptr: start,
+            len_ptr: Some(NonNull::from(&mut self.len)),
             _phantom: core::marker::PhantomData,
         }
     }
 
     /// Drops the `BlobVec` without dropping any of its elements.
-    pub fn forget(self) {
+    pub fn forget_contents(self) {
         let mut this = ManuallyDrop::new(self);
 
         // SAFETY: `this` will not be used again and won't be dropped, so we can safely deallocate its memory.
@@ -486,14 +488,15 @@ impl Drop for BlobVec {
     }
 }
 
-struct BlobVecIter<'a> {
-    start: NonNull<u8>,
-    len: usize,
-    layout: Layout,
-    _marker: core::marker::PhantomData<&'a mut BlobVec>,
+pub(crate) struct BlobIter<'a, Blob> {
+    pub(crate) start: NonNull<u8>,
+    // number of elements remaining; `start.byte_add(len * layout.size())` must be a valid pointer
+    pub(crate) len: usize,
+    pub(crate) layout: Layout,
+    pub(crate) _marker: core::marker::PhantomData<&'a mut Blob>,
 }
 
-impl<'a> Iterator for BlobVecIter<'a> {
+impl<'a, Blob> Iterator for BlobIter<'a, Blob> {
     type Item = PtrMut<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -512,70 +515,78 @@ impl<'a> Iterator for BlobVecIter<'a> {
     }
 }
 
-impl<'a> Default for BlobVecIter<'a> {
-    fn default() -> Self {
-        BlobVecIter {
-            start: NonNull::dangling(),
-            len: 0,
-            layout: Layout::new::<()>(),
+impl<'a, Blob> BlobIter<'a, Blob> {
+    fn take(&mut self) -> Self {
+        BlobIter {
+            start: self.start,
+            len: mem::replace(&mut self.len, 0),
+            layout: self.layout,
             _marker: core::marker::PhantomData,
         }
     }
 }
 
-impl<'a> ExactSizeIterator for BlobVecIter<'a> {
+impl<'a, Blob> ExactSizeIterator for BlobIter<'a, Blob> {
     fn len(&self) -> usize {
         self.len
     }
 }
 
-pub struct BlobVecDrain<'a> {
-    tail_len: usize,
-    tail_start: usize,
-    iter: BlobVecIter<'a>,
-    blob: NonNull<BlobVec>,
-    drop: Option<unsafe fn(OwningPtr<'_>)>,
-    _phantom: core::marker::PhantomData<&'a mut BlobVec>,
+pub struct BlobDrain<'a, Blob> {
+    // number of elements in the tail
+    pub(crate) tail_len: usize,
+    // index of the first element in the tail past the start of the drained range
+    pub(crate) tail_offset: usize,
+    pub(crate) iter: BlobIter<'a, Blob>,
+    // initial value of the BlobIter start ptr, used for moving the tail
+    pub(crate) start_ptr: NonNull<u8>,
+    // pointer to the length of the `BlobVec`, or None for `BlobArray`
+    pub(crate) len_ptr: Option<NonNull<usize>>,
+    pub(crate) drop: Option<unsafe fn(OwningPtr<'_>)>,
+    pub(crate) _phantom: core::marker::PhantomData<&'a mut Blob>,
 }
 
-impl<'a> Drop for BlobVecDrain<'a> {
+impl<'a, Blob> Drop for BlobDrain<'a, Blob> {
     fn drop(&mut self) {
-        struct DropGuard<'a, 'b>(&'a mut BlobVecDrain<'b>);
-        impl<'a, 'b> Drop for DropGuard<'a, 'b> {
+        struct DropGuard<'a, 'b, Blob>(&'a mut BlobDrain<'b, Blob>);
+        impl<'a, 'b, Blob> Drop for DropGuard<'a, 'b, Blob> {
             fn drop(&mut self) {
                 if self.0.tail_len > 0 {
                     // SAFETY: TODO
-                    let blob = unsafe { self.0.blob.as_mut() };
-                    let size = blob.item_layout.size();
-                    let start = blob.len();
-                    let tail = self.0.tail_start;
+                    let size = self.0.iter.layout.size();
 
-                    // memmove the tail to its new location
-                    if tail != start {
-                        // SAFETY: TODO
-                        unsafe {
-                            let src = blob.data.byte_add(size * tail);
-                            let dst = blob.data.byte_add(size * start);
-                            src.copy_to_nonoverlapping(dst, size * self.0.tail_len);
+                    // SAFETY: TODO
+                    unsafe {
+                        let dst = self.0.start_ptr;
+                        let src = self.0.start_ptr.byte_add(size * self.0.tail_offset);
+
+                        // check if we need to move the tail: draining an empty range is a no-op
+                        if src != dst {
+                            // memmove the tail to its new location
+                            src.copy_to(dst, size * self.0.tail_len);
+                        }
+
+                        if let Some(len) = self.0.len_ptr.as_mut().map(|ptr| ptr.as_mut()) {
+                            *len += self.0.tail_len;
                         }
                     }
-
-                    blob.len += self.0.tail_len;
                 }
             }
         }
 
-        let iter = core::mem::take(&mut self.iter);
-        let mut blob = self.blob;
+        let iter = BlobIter::take(&mut self.iter);
         let layout = iter.layout;
 
-        if layout.size() == 0 {
-            // ZSTs require no moving around, so we can just add the length of the tail to `len`.
-            // SAFETY: TODO
-            unsafe {
-                blob.as_mut().len += self.tail_len;
+        // SAFETY: TODO
+        unsafe {
+            if layout.size() == 0
+                && let Some(len) = self.len_ptr.as_mut().map(|ptr| ptr.as_mut())
+            {
+                // ZSTs require no moving around, so we can just add the length of the tail to `len`.
+                *len += self.tail_len;
+
+                return;
             }
-            return;
         }
 
         let drop = self.drop;

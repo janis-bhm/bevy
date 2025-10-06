@@ -231,16 +231,13 @@ impl BlobArray {
         len: usize,
         range: impl RangeBounds<usize>,
     ) -> BlobDrain<'_, Self> {
-        let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match bound {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => {
-                if start {
-                    n.checked_add(1).expect("range end overflow")
-                } else {
-                    n.checked_sub(1).expect("range start underflow")
-                }
-            }
-            Bound::Unbounded => or,
+        // TODO: use `slice::range` when it becomes stable
+        let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match (bound, start) {
+            (Bound::Included(&n), true) => n,
+            (Bound::Included(&n), false) => n.checked_add(1).expect("range end overflow"),
+            (Bound::Excluded(&n), true) => n.checked_add(1).expect("range start overflow"),
+            (Bound::Excluded(&n), false) => n,
+            (Bound::Unbounded, _) => or,
         };
 
         let Range { start, end } = {

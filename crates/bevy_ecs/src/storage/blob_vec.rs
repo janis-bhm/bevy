@@ -409,6 +409,7 @@ impl BlobVec {
     pub fn drain(&mut self, range: impl RangeBounds<usize>) -> BlobDrain<'_, Self> {
         let size = self.item_layout.size();
 
+        // TODO: use `slice::range` when it becomes stable
         let map_bound_or = |bound: Bound<&usize>, or: usize, start: bool| match (bound, start) {
             (Bound::Included(&n), true) => n,
             (Bound::Included(&n), false) => n.checked_add(1).expect("range end overflow"),

@@ -1981,6 +1981,25 @@ impl<'w> EntityWorldMut<'w> {
         )
     }
 
+    /// Adds a [`Bundle`] of components to the entity using a [`MovingPtr`].
+    ///
+    /// This will overwrite any previous value(s) of the same component type.
+    ///
+    /// # Panics
+    ///
+    /// If the entity has been despawned while this `EntityWorldMut` is still alive.
+    ///
+    /// See also [`EntityWorldMut::insert`] for inserting bundles by value.
+    #[track_caller]
+    pub fn insert_with_ptr<T: Bundle>(&mut self, bundle: MovingPtr<'_, T>) -> &mut Self {
+        self.insert_with_caller(
+            bundle,
+            InsertMode::Replace,
+            MaybeLocation::caller(),
+            RelationshipHookMode::Run,
+        )
+    }
+
     /// Adds a [`Bundle`] of components to the entity.
     /// [`Relationship`](crate::relationship::Relationship) components in the bundle will follow the configuration
     /// in `relationship_hook_mode`.
@@ -2010,6 +2029,36 @@ impl<'w> EntityWorldMut<'w> {
         )
     }
 
+    /// Adds a [`Bundle`] of components to the entity using a [`MovingPtr`].
+    /// [`Relationship`](crate::relationship::Relationship) components in the bundle will follow the configuration
+    /// in `relationship_hook_mode`.
+    ///
+    /// This will overwrite any previous value(s) of the same component type.
+    ///
+    /// # Warning
+    ///
+    /// This can easily break the integrity of relationships. This is intended to be used for cloning and spawning code internals,
+    /// not most user-facing scenarios.
+    ///
+    /// # Panics
+    ///
+    /// If the entity has been despawned while this `EntityWorldMut` is still alive.
+    ///
+    /// See also [`EntityWorldMut::insert_with_relationship_hook_mode`] for inserting bundles by value.
+    #[track_caller]
+    pub fn insert_with_relationship_hook_mode_with_ptr<T: Bundle>(
+        &mut self,
+        bundle: MovingPtr<'_, T>,
+        relationship_hook_mode: RelationshipHookMode,
+    ) -> &mut Self {
+        self.insert_with_caller(
+            bundle,
+            InsertMode::Replace,
+            MaybeLocation::caller(),
+            relationship_hook_mode,
+        )
+    }
+
     /// Adds a [`Bundle`] of components to the entity without overwriting.
     ///
     /// This will leave any previous value(s) of the same component type
@@ -2021,6 +2070,26 @@ impl<'w> EntityWorldMut<'w> {
     #[track_caller]
     pub fn insert_if_new<T: Bundle>(&mut self, bundle: T) -> &mut Self {
         move_as_ptr!(bundle);
+        self.insert_with_caller(
+            bundle,
+            InsertMode::Keep,
+            MaybeLocation::caller(),
+            RelationshipHookMode::Run,
+        )
+    }
+
+    /// Adds a [`Bundle`] of components to the entity without overwriting using a [`MovingPtr`].
+    ///
+    /// This will leave any previous value(s) of the same component type
+    /// unchanged.
+    ///
+    /// # Panics
+    ///
+    /// If the entity has been despawned while this `EntityWorldMut` is still alive.
+    ///
+    /// See also [`EntityWorldMut::insert_if_new`] for inserting bundles by value.
+    #[track_caller]
+    pub fn insert_if_new_with_ptr<T: Bundle>(&mut self, bundle: MovingPtr<'_, T>) -> &mut Self {
         self.insert_with_caller(
             bundle,
             InsertMode::Keep,

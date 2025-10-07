@@ -1156,6 +1156,17 @@ impl World {
         self.spawn_with_caller(bundle, MaybeLocation::caller())
     }
 
+    /// Spawns a new [`Entity`] with a given [`MovingPtr`] of a [`Bundle`] of [components](`Component`) and returns
+    /// a corresponding [`EntityWorldMut`], which can be used to add components to the entity or
+    /// retrieve its id. In case large batches of entities need to be spawned, consider using
+    /// [`World::spawn_batch`] instead.
+    ///
+    /// See also [`spawn`] for spawning bundles by value.
+    #[track_caller]
+    pub fn spawn_with_ptr<B: Bundle>(&mut self, bundle: MovingPtr<'_, B>) -> EntityWorldMut<'_> {
+        self.spawn_with_caller(bundle, MaybeLocation::caller())
+    }
+
     pub(crate) fn spawn_with_caller<B: Bundle>(
         &mut self,
         bundle: MovingPtr<'_, B>,

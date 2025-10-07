@@ -92,7 +92,7 @@ blocking = { version = "1.6", optional = true }
 
 [dev-dependencies]
 async-channel = "2"
-bevy_log = { path = "../bevy_log", version = "0.17.0-dev" }
+bevy_log = { path = "../bevy_log", version = "0.18.0-dev" }
 
 [lints]
 workspace = true

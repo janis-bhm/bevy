@@ -739,6 +739,7 @@ mod tests {
         prelude::*,
         schedule::{LogLevel, ScheduleBuildSettings},
     };
+    use bevy_log::LogPlugin;
     use bevy_platform::{
         collections::{HashMap, HashSet},
         sync::Mutex,
@@ -2285,6 +2286,7 @@ mod tests {
                 .with_processed_writer(move |_| Some(Box::new(processed_memory_writer.clone()))),
         )
         .add_plugins((
+            LogPlugin::default(),
             TaskPoolPlugin::default(),
             AssetPlugin {
                 mode: AssetMode::Processed,
@@ -2601,5 +2603,212 @@ mod tests {
             processed_asset,
             r#"(text:"abc_def",dependencies:[],embedded_dependencies:[],sub_texts:[])"#
         );
+    }
+
+    #[cfg(feature = "multi_threaded")]
+    #[test]
+    fn asset_processor_count_loads() {
+        use core::sync::atomic::{AtomicU32, Ordering};
+
+        struct WithCounter<T> {
+            inner: T,
+            counter: Arc<AtomicU32>,
+        }
+        impl<T> WithCounter<T> {
+            fn new(inner: T, counter: Arc<AtomicU32>) -> Self {
+                Self { inner, counter }
+            }
+        }
+
+        struct AddText;
+
+        impl MutateAsset<CoolText> for AddText {
+            fn mutate(&self, text: &mut CoolText) {
+                text.text.push_str("_def");
+            }
+        }
+
+        impl AssetSaver for WithCounter<CoolTextSaver> {
+            type Asset = CoolText;
+            type Settings = <CoolTextSaver as AssetSaver>::Settings;
+            type OutputLoader = <CoolTextSaver as AssetSaver>::OutputLoader;
+            type Error = <CoolTextSaver as AssetSaver>::Error;
+
+            async fn save(
+                &self,
+                writer: &mut crate::io::Writer,
+                asset: crate::saver::SavedAsset<'_, Self::Asset>,
+                settings: &Self::Settings,
+            ) -> Result<(), Self::Error> {
+                self.counter.fetch_add(1, Ordering::SeqCst);
+                self.inner.save(writer, asset, settings).await
+            }
+        }
+
+        impl AssetTransformer for WithCounter<RootAssetTransformer<AddText, CoolText>> {
+            type AssetInput = CoolText;
+            type AssetOutput = CoolText;
+            type Error = <RootAssetTransformer<AddText, CoolText> as AssetTransformer>::Error;
+            type Settings = <RootAssetTransformer<AddText, CoolText> as AssetTransformer>::Settings;
+
+            async fn transform<'a>(
+                &'a self,
+                asset: TransformedAsset<CoolText>,
+                settings: &'a Self::Settings,
+            ) -> Result<TransformedAsset<CoolText>, Self::Error> {
+                self.counter.fetch_add(1, Ordering::SeqCst);
+                self.inner.transform(asset, settings).await
+            }
+        }
+
+        impl AssetLoader for WithCounter<CoolTextLoader> {
+            type Asset = CoolText;
+            type Error = <CoolTextLoader as AssetLoader>::Error;
+            type Settings = <CoolTextLoader as AssetLoader>::Settings;
+
+            fn extensions(&self) -> &[&str] {
+                self.inner.extensions()
+            }
+
+            async fn load(
+                &self,
+                reader: &mut dyn Reader,
+                settings: &Self::Settings,
+                load_context: &mut LoadContext<'_>,
+            ) -> Result<Self::Asset, Self::Error> {
+                self.counter.fetch_add(1, Ordering::SeqCst);
+                self.inner.load(reader, settings, load_context).await
+            }
+        }
+
+        type CoolTextProcessor = LoadTransformAndSave<
+            WithCounter<CoolTextLoader>,
+            WithCounter<RootAssetTransformer<AddText, CoolText>>,
+            WithCounter<CoolTextSaver>,
+        >;
+
+        let AppWithProcessor {
+            mut app,
+            source_dir,
+            ..
+        } = create_app_with_asset_processor();
+
+        let insert_file = |path: &str, content: &str| {
+            let path = Path::new(path);
+            source_dir.insert_asset_text(path, content);
+        };
+        insert_file(
+            "a.cool.ron",
+            r#"(
+    text: "a",
+    dependencies: ["b.cool.ron", "c.cool.ron"],
+    embedded_dependencies: ["d.cool.ron", "e.cool.ron",],
+    sub_texts: [],
+)"#,
+        );
+        insert_file(
+            "b.cool.ron",
+            r#"(
+    text: "b",
+    dependencies: ["c.cool.ron"],
+    embedded_dependencies: ["e.cool.ron"],
+    sub_texts: [],
+)"#,
+        );
+        insert_file(
+            "c.cool.ron",
+            r#"(
+    text: "c",
+    dependencies: [],
+    embedded_dependencies: [],
+    sub_texts: [],
+)"#,
+        );
+        insert_file(
+            "d.cool.ron",
+            r#"(
+    text: "d",
+    dependencies: ["f.cool.ron"],
+    embedded_dependencies: [],
+    sub_texts: [],
+)"#,
+        );
+        insert_file(
+            "e.cool.ron",
+            r#"(
+    text: "e",
+    dependencies: [],
+    embedded_dependencies: [],
+    sub_texts: [],
+)"#,
+        );
+        insert_file(
+            "f.cool.ron",
+            r#"(
+    text: "f",
+    dependencies: [],
+    embedded_dependencies: [],
+    sub_texts: [],
+)"#,
+        );
+
+        let transformer = Arc::new(AtomicU32::new(0));
+        let loader = Arc::new(AtomicU32::new(0));
+        let saver = Arc::new(AtomicU32::new(0));
+
+        app.init_asset::<CoolText>()
+            .register_asset_loader(WithCounter::new(CoolTextLoader, loader.clone()))
+            .register_asset_processor(CoolTextProcessor::new(
+                WithCounter::new(RootAssetTransformer::new(AddText), transformer.clone()),
+                WithCounter::new(CoolTextSaver, saver.clone()),
+            ))
+            .set_default_asset_processor::<CoolTextProcessor>("cool.ron");
+
+        // Start the app, which also starts the asset processor.
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        // Wait for all processing to finish.
+        bevy_tasks::block_on(
+            app.world()
+                .resource::<AssetProcessor>()
+                .data()
+                .wait_until_finished(),
+        );
+
+        assert_eq!(loader.load(Ordering::SeqCst), 6);
+        assert_eq!(transformer.load(Ordering::SeqCst), 4);
+        assert_eq!(saver.load(Ordering::SeqCst), 4);
+
+        loader.store(0, Ordering::SeqCst);
+        transformer.store(0, Ordering::SeqCst);
+        saver.store(0, Ordering::SeqCst);
+
+        let server = app.world().resource::<AssetServer>().clone();
+        let handle: Handle<CoolText> = server.load("a.cool.ron");
+        let a_id = handle.id();
+
+        run_app_until(&mut app, |world| {
+            use crate::{DependencyLoadState, RecursiveDependencyLoadState};
+
+            let _a = get(world, a_id)?;
+            let (a_load, a_deps, a_rec_deps) = server.get_load_states(a_id).unwrap();
+            if !matches!(
+                (&a_load, &a_deps, &a_rec_deps),
+                (
+                    &LoadState::Loaded,
+                    &DependencyLoadState::Loaded,
+                    &RecursiveDependencyLoadState::Loaded
+                )
+            ) {
+                return None;
+            }
+            Some(())
+        });
+
+        assert_eq!(loader.load(Ordering::SeqCst), 7);
+        assert_eq!(transformer.load(Ordering::SeqCst), 4);
+        assert_eq!(saver.load(Ordering::SeqCst), 4);
     }
 }

@@ -2631,7 +2631,7 @@ mod tests {
         impl AssetSaver for WithCounter<CoolTextSaver> {
             type Asset = CoolText;
             type Settings = <CoolTextSaver as AssetSaver>::Settings;
-            type OutputLoader = <CoolTextSaver as AssetSaver>::OutputLoader;
+            type OutputLoader = WithCounter<<CoolTextSaver as AssetSaver>::OutputLoader>;
             type Error = <CoolTextSaver as AssetSaver>::Error;
 
             async fn save(
@@ -2777,9 +2777,14 @@ mod tests {
                 .wait_until_finished(),
         );
 
-        assert_eq!(loader.load(Ordering::SeqCst), 6);
-        assert_eq!(transformer.load(Ordering::SeqCst), 4);
-        assert_eq!(saver.load(Ordering::SeqCst), 4);
+        // a..=f source + [d, e] processed + [e] processed = 9
+        // TODO: e is loaded twice, because it is used twice as an embedded dependency.
+        // it is consumed twice; can it be loaded only once?
+        assert_eq!(loader.load(Ordering::SeqCst), 9);
+        // a..=f
+        assert_eq!(transformer.load(Ordering::SeqCst), 6);
+        // a..=f
+        assert_eq!(saver.load(Ordering::SeqCst), 6);
 
         loader.store(0, Ordering::SeqCst);
         transformer.store(0, Ordering::SeqCst);
@@ -2807,8 +2812,9 @@ mod tests {
             Some(())
         });
 
-        assert_eq!(loader.load(Ordering::SeqCst), 7);
-        assert_eq!(transformer.load(Ordering::SeqCst), 4);
-        assert_eq!(saver.load(Ordering::SeqCst), 4);
+        // a, and dependencies [b, c]
+        assert_eq!(loader.load(Ordering::SeqCst), 3);
+        assert_eq!(transformer.load(Ordering::SeqCst), 0);
+        assert_eq!(saver.load(Ordering::SeqCst), 0);
     }
 }

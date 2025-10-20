@@ -618,14 +618,18 @@ unsafe impl<P: SystemParam, B: SystemParamBuilder<P>> SystemParamBuilder<If<P>> 
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "bevy_reflect")]
+    use crate::reflect::ReflectResource;
     use crate::{
         entity::Entities,
         error::Result,
         prelude::{Component, Query},
-        reflect::ReflectResource,
         system::{Local, RunSystemOnce},
     };
+
     use alloc::vec;
+
+    #[cfg(feature = "bevy_reflect")]
     use bevy_reflect::{FromType, Reflect, ReflectRef};
 
     use super::*;
@@ -639,8 +643,9 @@ mod tests {
     #[derive(Component)]
     struct C;
 
-    #[derive(Resource, Default, Reflect)]
-    #[reflect(Resource)]
+    #[derive(Resource, Default)]
+    #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+    #[cfg_attr(feature = "bevy_reflect", reflect(Resource))]
     struct R {
         foo: usize,
     }
@@ -1026,6 +1031,7 @@ mod tests {
             .build_system(|_r: ResMut<R>, _fr: FilteredResourcesMut| {});
     }
 
+    #[cfg(feature = "bevy_reflect")]
     #[test]
     fn filtered_resource_reflect() {
         let mut world = World::new();

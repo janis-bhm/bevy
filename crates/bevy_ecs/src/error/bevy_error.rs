@@ -167,6 +167,7 @@ pub fn bevy_error_panic_hook(
 mod tests {
 
     #[test]
+    #[cfg(feature = "backtrace")]
     #[cfg(not(miri))] // miri backtraces are weird
     #[cfg(not(windows))] // the windows backtrace in this context is ... unhelpful and not worth testing
     fn filtered_backtrace_test() {

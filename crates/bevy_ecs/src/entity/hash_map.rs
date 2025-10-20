@@ -261,6 +261,7 @@ unsafe impl<V> EntitySetIterator for IntoKeys<V> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "bevy_reflect")]
     use bevy_reflect::Reflect;
     use static_assertions::assert_impl_all;
 

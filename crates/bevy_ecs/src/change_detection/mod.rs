@@ -29,6 +29,7 @@ pub const MAX_CHANGE_AGE: u32 = u32::MAX - (2 * CHECK_TICK_THRESHOLD - 1);
 mod tests {
     use bevy_ecs_macros::Resource;
     use bevy_ptr::PtrMut;
+    #[cfg(feature = "bevy_reflect")]
     use bevy_reflect::{FromType, ReflectFromPtr};
     use core::ops::{Deref, DerefMut};
 
@@ -318,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "bevy_reflect")]
     fn mut_untyped_to_reflect() {
         let last_run = Tick::new(2);
         let this_run = Tick::new(3);

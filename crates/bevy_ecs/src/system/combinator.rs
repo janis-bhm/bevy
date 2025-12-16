@@ -489,11 +489,50 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::error::DefaultErrorHandler;
+    use crate::prelude::*;
+    use bevy_utils::prelude::DebugName;
+
+    use crate::{
+        schedule::OrMarker,
+        system::{assert_system_does_not_conflict, CombinatorSystem},
+    };
+
+    #[test]
+    fn combinator_with_error_handler_access() {
+        fn my_system(_: ResMut<DefaultErrorHandler>) {}
+        fn a() -> bool {
+            true
+        }
+        fn b(_: ResMut<DefaultErrorHandler>) -> bool {
+            true
+        }
+        fn asdf(_: In<bool>) {}
+
+        let mut world = World::new();
+        world.insert_resource(DefaultErrorHandler::default());
+
+        let system = CombinatorSystem::<OrMarker, _, _>::new(
+            IntoSystem::into_system(a),
+            IntoSystem::into_system(b),
+            DebugName::borrowed("a OR b"),
+        );
+
+        // `system` should not conflict with itself by mutably accessing the error handler resource.
+        assert_system_does_not_conflict(system.clone());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((my_system, system.pipe(asdf)));
+        schedule.initialize(&mut world).unwrap();
+
+        // `my_system` should conflict with the combinator system because the combinator reads the error handler resource.
+        assert!(!schedule.graph().conflicting_systems().is_empty());
+
+        schedule.run(&mut world);
+    }
 
     #[test]
     fn exclusive_system_piping_is_possible() {
-        use crate::prelude::*;
-
         fn my_exclusive_system(_world: &mut World) -> u32 {
             1
         }

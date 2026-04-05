@@ -97,20 +97,7 @@ jobs:
         # See tools/ci/src/main.rs for the commands this runs
         run: cargo run -p ci -- lints
 
-  toolchain-version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.rustc.outputs.version }}
-    steps:
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
-      - name: Build Miri sysroot (only does work if missing)
-        id: rustc
-        run: echo "version=$(rustc --version)" >> $GITHUB_OUTPUT
-
   miri-sysroot:
-    needs: [toolchain-version]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -118,28 +105,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Restore miri sysroot + toolchain cache
-        id: cache
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
-            ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--
-          path: |
-            .miri/
-
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: miri
 
-      - name: Build Miri sysroot (only does work if missing)
+      - name: Build Miri Sysroot
         run: cargo miri setup
-        env:
-          MIRI_SYSROOT: .miri/
 
       - name: Build Tests
         # To run the tests one item at a time for troubleshooting, use
@@ -152,28 +124,23 @@ jobs:
           # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
           # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
           MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
-          MIRI_SYSROOT: .miri/
 
-      - name: Save miri sysroot + toolchain cache
-        if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
-          path: |
-            .miri/
+      - name: Find Sysroot
+        id: sysroot
+        run: echo "path=$(cargo miri setup --print-sysroot)" >> $GITHUB_ENV
 
-      - name: Upload sysroot for this run (fan-out)
+      - name: Upload sysroot for this run
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           include-hidden-files: true
           name: miri-sysroot-${{ runner.os }}-
           path: |
-            .miri/
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+            ${{ steps.sysroot.outputs.path }}
 
   miri-setup-partitions:
     runs-on: ubuntu-latest
@@ -207,13 +174,6 @@ jobs:
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
         with:
           name: miri-sysroot-${{ runner.os }}-
-          path: |
-            .miri/
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
 
       # - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       #   with:

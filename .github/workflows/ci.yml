@@ -26,121 +26,121 @@ concurrency:
   cancel-in-progress: ${{github.event_name == 'pull_request'}}
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable--
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-      - name: Build & run tests
-        # See tools/ci/src/main.rs for the commands this runs
-        run: cargo run -p ci -- test
-        env:
-          RUSTFLAGS: "-C debuginfo=0 -D warnings"
+  # build:
+  #   strategy:
+  #     matrix:
+  #       os: [windows-latest, ubuntu-latest, macos-latest]
+  #   runs-on: ${{ matrix.os }}
+  #   timeout-minutes: 30
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable--
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #     - name: Build & run tests
+  #       # See tools/ci/src/main.rs for the commands this runs
+  #       run: cargo run -p ci -- test
+  #       env:
+  #         RUSTFLAGS: "-C debuginfo=0 -D warnings"
 
-  ci:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable--
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-        with:
-          wayland: true
-          xkb: true
-          x264: true
-          fontconfig: true
-      - name: CI job
-        # See tools/ci/src/main.rs for the commands this runs
-        run: cargo run -p ci -- lints
+  # ci:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable--
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #         components: rustfmt, clippy
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #       with:
+  #         wayland: true
+  #         xkb: true
+  #         x264: true
+  #         fontconfig: true
+  #     - name: CI job
+  #       # See tools/ci/src/main.rs for the commands this runs
+  #       run: cargo run -p ci -- lints
 
-  miri-sysroot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          persist-credentials: false
+  # miri-sysroot:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 60
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+  #       with:
+  #         persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
-          components: miri
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+  #         components: miri
 
-      - name: Build Miri Sysroot
-        run: cargo miri setup
+  #     - name: Build Miri Sysroot
+  #       run: cargo miri setup
 
-      - name: Build Tests
-        # To run the tests one item at a time for troubleshooting, use
-        # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact
-        run: cargo miri test -p bevy_ecs --features bevy_utils/debug --no-run
-        env:
-          # -Zrandomize-layout makes sure we dont rely on the layout of anything that might change
-          RUSTFLAGS: -Zrandomize-layout
-          # https://github.com/rust-lang/miri#miri--z-flags-and-environment-variables
-          # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
-          # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
-          MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
+  #     - name: Build Tests
+  #       # To run the tests one item at a time for troubleshooting, use
+  #       # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact
+  #       run: cargo miri test -p bevy_ecs --features bevy_utils/debug --no-run
+  #       env:
+  #         # -Zrandomize-layout makes sure we dont rely on the layout of anything that might change
+  #         RUSTFLAGS: -Zrandomize-layout
+  #         # https://github.com/rust-lang/miri#miri--z-flags-and-environment-variables
+  #         # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
+  #         # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
+  #         MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
 
-      - name: Find Sysroot
-        id: sysroot
-        run: echo "path=$(cargo miri setup --print-sysroot)" >> $GITHUB_ENV
+  #     - name: Find Sysroot
+  #       id: sysroot
+  #       run: echo "path=$(cargo miri setup --print-sysroot)" >> $GITHUB_ENV
 
-      - name: Upload sysroot for this run
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
-        with:
-          include-hidden-files: true
-          name: miri-sysroot-${{ runner.os }}-
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-            ${{ steps.sysroot.outputs.path }}
+  #     - name: Upload sysroot for this run
+  #       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+  #       with:
+  #         include-hidden-files: true
+  #         name: miri-sysroot-${{ runner.os }}-
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #           ${{ steps.sysroot.outputs.path }}
 
   miri-setup-partitions:
     runs-on: ubuntu-latest
@@ -159,7 +159,7 @@ jobs:
           echo "partitions=$t$count]" >> $GITHUB_OUTPUT
 
   miri-run-partitions:
-    needs: [miri-setup-partitions, miri-sysroot]
+    needs: [miri-setup-partitions]
     strategy:
       matrix:
         partition: ${{ fromJSON(needs.miri-setup-partitions.outputs.partitions) }}
@@ -170,25 +170,25 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download prepared Miri sysroot
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
-        with:
-          name: miri-sysroot-${{ runner.os }}-
-
-      # - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+      # - name: Download prepared Miri sysroot
+      #   uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
       #   with:
-      #     # key won't match, will rely on restore-keys
-      #     key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
-      #     # See .github/workflows/update-caches.yml for how keys are generated
-      #     restore-keys: |
-      #       ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
-      #       ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--
-      #     path: |
-      #       ~/.cargo/bin/
-      #       ~/.cargo/registry/index/
-      #       ~/.cargo/registry/cache/
-      #       ~/.cargo/git/db/
-      #       target/
+      #     name: miri-sysroot-${{ runner.os }}-
+
+      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          # key won't match, will rely on restore-keys
+          key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
+          # See .github/workflows/update-caches.yml for how keys are generated
+          restore-keys: |
+            ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
+            ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
 
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
@@ -198,7 +198,18 @@ jobs:
       - name: Install cargo-nextest
         run: |
           curl -LsSf https://get.nexte.st/0.9/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-      - name: CI job
+      - name: Build tests
+        # To run the tests one item at a time for troubleshooting, use
+        # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact
+        run: cargo miri nextest run -p bevy_ecs --no-run --features bevy_utils/debug --partition count:${{ matrix.partition }}/${{ strategy.job-total }}
+        env:
+          # -Zrandomize-layout makes sure we dont rely on the layout of anything that might change
+          RUSTFLAGS: -Zrandomize-layout
+          # https://github.com/rust-lang/miri#miri--z-flags-and-environment-variables
+          # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
+          # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
+          MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
+      - name: Build tests
         # To run the tests one item at a time for troubleshooting, use
         # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact
         run: cargo miri nextest run -p bevy_ecs --features bevy_utils/debug --partition count:${{ matrix.partition }}/${{ strategy.job-total }}
@@ -217,197 +228,197 @@ jobs:
     steps:
       - run: ${{ !contains(needs.*.result, 'failure') }}
 
-  check-compiles:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: ci
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable--
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-      - name: Check Compile
-        # See tools/ci/src/main.rs for the commands this runs
-        run: cargo run -p ci -- compile
+  # check-compiles:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: ci
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable--${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable--
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #     - name: Check Compile
+  #       # See tools/ci/src/main.rs for the commands this runs
+  #       run: cargo run -p ci -- compile
 
-  check-compiles-no-std:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: ci
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable-x86_64-unknown-none-
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-none
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-      - name: Check Compile
-        run: cargo check -p bevy --no-default-features --features default_no_std --target x86_64-unknown-none
-      # Check for regression in "web" feature breaking no_std builds.
-      # This is not a separate CI job because the added feature should mostly have no effect
-      # and be able to reuse the prior build.
-      - name: Check Compile with --features=web
-        run: cargo check -p bevy --no-default-features --features default_no_std,web --target x86_64-unknown-none
+  # check-compiles-no-std:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: ci
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable-x86_64-unknown-none-
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #         targets: x86_64-unknown-none
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #     - name: Check Compile
+  #       run: cargo check -p bevy --no-default-features --features default_no_std --target x86_64-unknown-none
+  #     # Check for regression in "web" feature breaking no_std builds.
+  #     # This is not a separate CI job because the added feature should mostly have no effect
+  #     # and be able to reuse the prior build.
+  #     - name: Check Compile with --features=web
+  #       run: cargo check -p bevy --no-default-features --features default_no_std,web --target x86_64-unknown-none
 
-  check-compiles-no-std-portable-atomic:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: ci
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable-thumbv6m-none-eabi-${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable-thumbv6m-none-eabi-${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable-thumbv6m-none-eabi-
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-          targets: thumbv6m-none-eabi
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-      - name: Check Compile
-        run: cargo check -p bevy --no-default-features --features default_no_std --target thumbv6m-none-eabi
+  # check-compiles-no-std-portable-atomic:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: ci
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable-thumbv6m-none-eabi-${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable-thumbv6m-none-eabi-${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable-thumbv6m-none-eabi-
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #         targets: thumbv6m-none-eabi
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #     - name: Check Compile
+  #       run: cargo check -p bevy --no-default-features --features default_no_std --target thumbv6m-none-eabi
 
-  check-compiles-no-std-examples:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: ci
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable-x86_64-unknown-none-
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-none
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-      - name: Check Compile
-        run: cd examples/no_std/library && cargo check --no-default-features --features libm,critical-section --target x86_64-unknown-none
+  # check-compiles-no-std-examples:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: ci
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable-x86_64-unknown-none-${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable-x86_64-unknown-none-
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #         targets: x86_64-unknown-none
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #     - name: Check Compile
+  #       run: cd examples/no_std/library && cargo check --no-default-features --features libm,critical-section --target x86_64-unknown-none
 
-  build-wasm:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: build
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-stable-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-stable-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-stable-wasm32-unknown-unknown-
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-          target: wasm32-unknown-unknown
-      - name: Check wasm
-        env:
-          RUSTFLAGS: --cfg getrandom_backend="wasm_js"
-        run: cargo check --target wasm32-unknown-unknown
+  # build-wasm:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: build
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-stable-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-stable-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-stable-wasm32-unknown-unknown-
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #         target: wasm32-unknown-unknown
+  #     - name: Check wasm
+  #       env:
+  #         RUSTFLAGS: --cfg getrandom_backend="wasm_js"
+  #       run: cargo check --target wasm32-unknown-unknown
 
-  build-wasm-atomics:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: build
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-wasm32-unknown-unknown-
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
-          targets: wasm32-unknown-unknown
-          components: rust-src
-      - name: Check wasm
-        run: cargo check --target wasm32-unknown-unknown -Z build-std=std,panic_abort
-        env:
-          RUSTFLAGS: '-C target-feature=+atomics,+bulk-memory --cfg getrandom_backend="wasm_js"'
+  # build-wasm-atomics:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: build
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-wasm32-unknown-unknown-${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-wasm32-unknown-unknown-
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+  #         targets: wasm32-unknown-unknown
+  #         components: rust-src
+  #     - name: Check wasm
+  #       run: cargo check --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+  #       env:
+  #         RUSTFLAGS: '-C target-feature=+atomics,+bulk-memory --cfg getrandom_backend="wasm_js"'
 
   markdownlint:
     runs-on: ubuntu-latest

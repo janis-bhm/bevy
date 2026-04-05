@@ -127,10 +127,11 @@ jobs:
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
           # See .github/workflows/update-caches.yml for how keys are generated
           restore-keys: |
-          ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
+          ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--
           path: |
             ~/.miri/
 
@@ -148,7 +149,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
-          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
           path: |
             ~/.miri/
 

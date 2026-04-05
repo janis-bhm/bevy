@@ -99,7 +99,7 @@ jobs:
   toolchain-version:
     runs-on: ubuntu-latest
     outputs:
-      toolchain-version: ${{ steps.rustc.outputs.version }}
+      version: ${{ steps.rustc.outputs.version }}
     steps:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
@@ -117,11 +117,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set rustup/cargo homes (workspace-local)
-        run: |
-          echo "RUSTUP_HOME=${{ github.workspace }}/.rustup" >> $GITHUB_ENV
-          echo "CARGO_HOME=${{ github.workspace }}/.cargo" >> $GITHUB_ENV
-
       - name: Restore miri sysroot + toolchain cache
         id: cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
@@ -130,8 +125,8 @@ jobs:
           key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
           # See .github/workflows/update-caches.yml for how keys are generated
           restore-keys: |
-          ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
-          ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--
+            ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
+            ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--
           path: |
             ~/.miri/
 
@@ -177,7 +172,7 @@ jobs:
           echo "partitions=$t$count]" >> $GITHUB_OUTPUT
 
   miri-partitions:
-    needs: [miri-setup-partitions]
+    needs: [miri-setup-partitions, miri-sysroot]
     strategy:
       matrix:
         partitions: ${{ fromJSON(needs.miri-setup-partitions.outputs.partitions) }}

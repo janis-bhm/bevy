@@ -158,54 +158,74 @@ jobs:
           done
           echo "partitions=$t$count]" >> $GITHUB_OUTPUT
 
-  # miri-build-artifacts:
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 60
-  #   steps:
-  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  #       with:
-  #         persist-credentials: false
-  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-  #       with:
-  #         # key won't match, will rely on restore-keys
-  #         key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
-  #         # See .github/workflows/update-caches.yml for how keys are generated
-  #         restore-keys: |
-  #           ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
-  #           ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #           target/
-  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-  #       with:
-  #         toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
-  #         components: miri
-  #     - name: Install cargo-nextest
-  #       run: |
-  #         curl -LsSf https://get.nexte.st/0.9/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-  #     - name: Build Tests
-  #       # To run the tests one item at a time for troubleshooting, use
-  #       # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact
-  #       run: cargo miri nextest run -p bevy_ecs --features bevy_utils/debug --archive-file nextest-archive.tar.zst
-  #       env:
-  #         # -Zrandomize-layout makes sure we dont rely on the layout of anything that might change
-  #         RUSTFLAGS: -Zrandomize-layout
-  #         # https://github.com/rust-lang/miri#miri--z-flags-and-environment-variables
-  #         # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
-  #         # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
-  #         MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
-  #     - name: Upload build artifacts
-  #       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
-  #       with:
-  #         include-hidden-files: true
-  #         name: miri-nextest-archive
-  #         path: nextest-archive.tar.zst
+  miri-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # prepare the date - used to rebuild the cache daily to update the cache for rust nightly, even if no change on Bevy dependencies
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Checkout Bevy main branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        id: rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+          components: miri
+
+      # prepare the lockfile - to have a complete image of the dependencies on the current platform
+      - name: Create lock file
+        run: cargo update
+
+      # Fetch the cache using the complete key - to avoid rebuilding the cache if nothing changed
+      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-miri-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-${{ steps.get-date.outputs.date }}
+          lookup-only: true
+
+      - name: Install Bevy dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/install-linux-deps
+        with:
+          wayland: true
+          xkb: true
+          x264: true
+          fontconfig: true
+
+      # Build Bevy for the dev profile, used by check, doc, ...
+      - name: Build miri cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cargo miri nextest run -p bevy_ecs --features bevy_utils/debug --no-run
+
+      - name: Save cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-miri-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-${{ steps.get-date.outputs.date }}
 
   miri-run-partitions:
-    needs: [miri-setup-partitions]
+    needs: [miri-setup-partitions miri-cache]
     strategy:
       matrix:
         partition: ${{ fromJSON(needs.miri-setup-partitions.outputs.partitions) }}
@@ -216,32 +236,29 @@ jobs:
         with:
           persist-credentials: false
 
-      # - name: Download prepared Miri sysroot
-      #   uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
-      #   with:
-      #     name: miri-nextest-archive
-
-      # - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-      #   with:
-      #     # key won't match, will rely on restore-keys
-      #     key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
-      #     # See .github/workflows/update-caches.yml for how keys are generated
-      #     restore-keys: |
-      #       ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
-      #       ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--
-      #     path: |
-      #       ~/.cargo/bin/
-      #       ~/.cargo/registry/index/
-      #       ~/.cargo/registry/cache/
-      #       ~/.cargo/git/db/
-      #       target/
+      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          # key won't match, will rely on restore-keys
+          key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}--${{ hashFiles('**/Cargo.toml') }}-
+          # See .github/workflows/update-caches.yml for how keys are generated
+          restore-keys: |
+            ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-miri-${{ hashFiles('**/Cargo.toml') }}-
+            ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-miri-
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
 
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: miri
+
       - name: Install nextest
         uses: taiki-e/install-action@nextest
+
       - name: Run Tests
         # To run the tests one item at a time for troubleshooting, use
         # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact

@@ -96,13 +96,104 @@ jobs:
         # See tools/ci/src/main.rs for the commands this runs
         run: cargo run -p ci -- lints
 
-  miri:
-    runs-on: macos-latest
+  toolchain-version:
+    runs-on: ubuntu-latest
+    outputs:
+      toolchain-version: ${{ steps.rustc.outputs.version }}
+    steps:
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+      - name: Build Miri sysroot (only does work if missing)
+        id: rustc
+        run: echo "version=$(rustc --version)" >> $GITHUB_OUTPUT
+
+  miri-sysroot:
+    needs: [toolchain-version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set rustup/cargo homes (workspace-local)
+        run: |
+          echo "RUSTUP_HOME=${{ github.workspace }}/.rustup" >> $GITHUB_ENV
+          echo "CARGO_HOME=${{ github.workspace }}/.cargo" >> $GITHUB_ENV
+
+      - name: Restore miri sysroot + toolchain cache
+        id: cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          # key won't match, will rely on restore-keys
+          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          # See .github/workflows/update-caches.yml for how keys are generated
+          restore-keys: |
+          ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          path: |
+            ~/.miri/
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+          components: miri
+
+      - name: Build Miri sysroot (only does work if missing)
+        run: cargo miri setup
+        env:
+          MIRI_SYSROOT: ~/.miri/
+
+      - name: Save miri sysroot + toolchain cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          path: |
+            ~/.miri/
+
+      - name: Upload sysroot for this run (fan-out)
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: miri-sysroot-${{ runner.os }}-${{ needs.toolchain-version.outputs.version }}
+          path: |
+            ~/.miri/
+
+  miri-setup-partitions:
+    runs-on: ubuntu-latest
+    outputs:
+      partitions: ${{ steps.list.outputs.partitions }}
+    steps:
+      - name: Setup partition list
+        id: list
+        run: |
+          count=20
+          t="["
+          for i in `seq 1 $((count-1))`
+          do
+          t="$t$i,"
+          done
+          echo "partitions=$t$count]" >> $GITHUB_OUTPUT
+
+  miri-partitions:
+    needs: [miri-setup-partitions]
+    strategy:
+      matrix:
+        partitions: ${{ fromJSON(needs.miri-setup-partitions.outputs.partitions) }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      - name: Download prepared Miri sysroot
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: miri-sysroot-${{ runner.os }}-${{ needs.toolchain-version.outputs.version }}
+          path: |
+            ~/.miri/
+
       - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           # key won't match, will rely on restore-keys
@@ -117,14 +208,19 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: miri
+
+      - name: Install cargo-nexttest
+        run: |
+          curl -LsSf https://get.nexte.st/0.9/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
       - name: CI job
         # To run the tests one item at a time for troubleshooting, use
         # cargo --quiet test --lib -- --list | sed 's/: test$//' | MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation" xargs -n1 cargo miri test -p bevy_ecs --lib -- --exact
-        run: cargo miri test -p bevy_ecs --features bevy_utils/debug
+        run: cargo miri nexttest run -p bevy_ecs --features bevy_utils/debug --partition count:${{ matrix.partition }}/${{ strategy.job-total }}
         env:
           # -Zrandomize-layout makes sure we dont rely on the layout of anything that might change
           RUSTFLAGS: -Zrandomize-layout
@@ -132,6 +228,14 @@ jobs:
           # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
           # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
           MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
+          MIRI_SYSROOT: ~/.miri/
+
+  miri:
+    runs-on: ubuntu-latest
+    needs: [miri-run-partitions]
+    if: always()
+    steps:
+      - run: ${{ !contains(needs.*.result, 'failure') }}
 
   check-compiles:
     runs-on: ubuntu-latest

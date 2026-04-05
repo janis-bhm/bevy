@@ -209,7 +209,6 @@ jobs:
           # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
           # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
           MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
-          MIRI_SYSROOT: .miri/
 
   miri:
     runs-on: ubuntu-latest

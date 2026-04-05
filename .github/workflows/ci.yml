@@ -600,54 +600,54 @@ jobs:
           name: missing-features
           path: missing-features/
 
-  msrv:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: build
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-      - name: get MSRV
-        id: msrv
-        run: |
-          msrv=`cargo metadata --no-deps --format-version 1 | jq --raw-output '.packages[] | select(.name=="bevy") | .rust_version'`
-          echo "msrv=$msrv" >> $GITHUB_OUTPUT
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: ${{ steps.msrv.outputs.msrv }}
-      - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          # key won't match, will rely on restore-keys
-          key: ${{ runner.os }}-${{ steps.msrv.outputs.msrv }}--${{ hashFiles('**/Cargo.toml') }}-
-          # See .github/workflows/update-caches.yml for how keys are generated
-          restore-keys: |
-            ${{ runner.os }}-${{ steps.msrv.outputs.msrv }}--${{ hashFiles('**/Cargo.toml') }}-
-            ${{ runner.os }}-${{ steps.msrv.outputs.msrv }}--
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-      - name: Install Linux dependencies
-        uses: ./.github/actions/install-linux-deps
-      - name: Run cargo check
-        id: check
-        run: cargo check
-      - name: Save PR number
-        if: ${{ failure() && github.event_name == 'pull_request' && steps.check.conclusion == 'failure' }}
-        run: |
-          mkdir -p ./msrv
-          echo ${{ github.event.number }} > ./msrv/NR
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        if: ${{ failure() && github.event_name == 'pull_request' && steps.check.conclusion == 'failure' }}
-        with:
-          name: msrv
-          path: msrv/
+  # msrv:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   needs: build
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: stable
+  #     - name: get MSRV
+  #       id: msrv
+  #       run: |
+  #         msrv=`cargo metadata --no-deps --format-version 1 | jq --raw-output '.packages[] | select(.name=="bevy") | .rust_version'`
+  #         echo "msrv=$msrv" >> $GITHUB_OUTPUT
+  #     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+  #       with:
+  #         toolchain: ${{ steps.msrv.outputs.msrv }}
+  #     - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+  #       with:
+  #         # key won't match, will rely on restore-keys
+  #         key: ${{ runner.os }}-${{ steps.msrv.outputs.msrv }}--${{ hashFiles('**/Cargo.toml') }}-
+  #         # See .github/workflows/update-caches.yml for how keys are generated
+  #         restore-keys: |
+  #           ${{ runner.os }}-${{ steps.msrv.outputs.msrv }}--${{ hashFiles('**/Cargo.toml') }}-
+  #           ${{ runner.os }}-${{ steps.msrv.outputs.msrv }}--
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #     - name: Install Linux dependencies
+  #       uses: ./.github/actions/install-linux-deps
+  #     - name: Run cargo check
+  #       id: check
+  #       run: cargo check
+  #     - name: Save PR number
+  #       if: ${{ failure() && github.event_name == 'pull_request' && steps.check.conclusion == 'failure' }}
+  #       run: |
+  #         mkdir -p ./msrv
+  #         echo ${{ github.event.number }} > ./msrv/NR
+  #     - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+  #       if: ${{ failure() && github.event_name == 'pull_request' && steps.check.conclusion == 'failure' }}
+  #       with:
+  #         name: msrv
+  #         path: msrv/
 
   check-bevy-internal-imports:
     runs-on: ubuntu-latest

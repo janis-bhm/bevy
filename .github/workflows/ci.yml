@@ -171,7 +171,7 @@ jobs:
           done
           echo "partitions=$t$count]" >> $GITHUB_OUTPUT
 
-  miri-partitions:
+  miri-run-partitions:
     needs: [miri-setup-partitions, miri-sysroot]
     strategy:
       matrix:

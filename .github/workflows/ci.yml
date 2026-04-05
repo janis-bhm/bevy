@@ -129,7 +129,7 @@ jobs:
             ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
             ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--
           path: |
-            ~/.miri/
+            .miri/
 
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
@@ -139,7 +139,7 @@ jobs:
       - name: Build Miri sysroot (only does work if missing)
         run: cargo miri setup
         env:
-          MIRI_SYSROOT: ~/.miri/
+          MIRI_SYSROOT: .miri/
 
       - name: Save miri sysroot + toolchain cache
         if: steps.cache.outputs.cache-hit != 'true'
@@ -147,14 +147,14 @@ jobs:
         with:
           key: ${{ runner.os }}-miri-${{ needs.toolchain-version.outputs.version }}--${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-
           path: |
-            ~/.miri/
+            .miri/
 
       - name: Upload sysroot for this run (fan-out)
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: miri-sysroot-${{ runner.os }}-${{ needs.toolchain-version.outputs.version }}
           path: |
-            ~/.miri/
+            .miri/
 
   miri-setup-partitions:
     runs-on: ubuntu-latest
@@ -189,7 +189,7 @@ jobs:
         with:
           name: miri-sysroot-${{ runner.os }}-${{ needs.toolchain-version.outputs.version }}
           path: |
-            ~/.miri/
+            .miri/
 
       - uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
@@ -225,7 +225,7 @@ jobs:
           # -Zmiri-disable-isolation is needed because our executor uses `fastrand` which accesses system time.
           # -Zmiri-ignore-leaks is necessary because a bunch of tests don't join all threads before finishing.
           MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation
-          MIRI_SYSROOT: ~/.miri/
+          MIRI_SYSROOT: .miri/
 
   miri:
     runs-on: ubuntu-latest

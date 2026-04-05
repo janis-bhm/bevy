@@ -2063,6 +2063,10 @@ mod tests {
         fn custom_clone(_source: &SourceComponent, _ctx: &mut ComponentCloneCtx) {}
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "Miri is too slow to run this test with the number of iterations"
+    )]
     #[test]
     fn queue_register_component_toctou() {
         for _ in 0..1000 {

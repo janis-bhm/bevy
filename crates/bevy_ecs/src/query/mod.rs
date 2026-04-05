@@ -156,6 +156,7 @@ mod tests {
         assert_eq!(values, vec![&B(3)]);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn query_filtered_exactsizeiterator_len() {
         fn choose(n: usize, k: usize) -> usize {

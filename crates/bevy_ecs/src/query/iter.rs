@@ -3047,6 +3047,7 @@ mod tests {
     #[derive(Component)]
     struct Marker;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn query_iter_sorts() {
         let mut world = World::new();

@@ -225,7 +225,7 @@ jobs:
           key: ${{ runner.os }}-${{ env.NIGHTLY_TOOLCHAIN }}-miri-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}-${{ steps.get-date.outputs.date }}
 
   miri-run-partitions:
-    needs: [miri-setup-partitions miri-cache]
+    needs: [miri-setup-partitions, miri-cache]
     strategy:
       matrix:
         partition: ${{ fromJSON(needs.miri-setup-partitions.outputs.partitions) }}

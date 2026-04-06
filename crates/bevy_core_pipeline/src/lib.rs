@@ -19,12 +19,10 @@ pub mod skybox;
 pub mod tonemapping;
 pub mod upscaling;
 
+pub use bevy_core_pipeline_types::FullscreenShader;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 pub use bevy_light::Skybox;
-pub use fullscreen_vertex_shader::FullscreenShader;
 pub use schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems};
-
-mod fullscreen_vertex_shader;
 
 use crate::schedule::{
     camera_driver, handle_uncovered_swap_chains, submit_pending_command_buffers,
@@ -46,7 +44,7 @@ pub struct CorePipelinePlugin;
 
 impl Plugin for CorePipelinePlugin {
     fn build(&self, app: &mut App) {
-        embedded_asset!(app, "fullscreen_vertex_shader/fullscreen.wgsl");
+        embedded_asset!(app, "fullscreen.wgsl");
 
         app.add_plugins((Core2dPlugin, Core3dPlugin, CopyDeferredLightingIdPlugin))
             .add_plugins((

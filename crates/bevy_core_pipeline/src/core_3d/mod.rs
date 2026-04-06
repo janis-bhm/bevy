@@ -1,73 +1,38 @@
 mod main_opaque_pass_3d_node;
 mod main_transparent_pass_3d_node;
 
-// PERF: vulkan docs recommend using 24 bit depth for better performance
-pub const CORE_3D_DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
-
-/// True if multisampled depth textures are supported on this platform.
-///
-/// In theory, Naga supports depth textures on WebGL 2. In practice, it doesn't,
-/// because of a silly bug whereby Naga assumes that all depth textures are
-/// `sampler2DShadow` and will cheerfully generate invalid GLSL that tries to
-/// perform non-percentage-closer-filtering with such a sampler. Therefore we
-/// disable depth of field and screen space reflections entirely on WebGL 2.
-#[cfg(not(any(feature = "webgpu", not(target_arch = "wasm32"))))]
-pub const DEPTH_TEXTURE_SAMPLING_SUPPORTED: bool = false;
-
-/// True if multisampled depth textures are supported on this platform.
-///
-/// In theory, Naga supports depth textures on WebGL 2. In practice, it doesn't,
-/// because of a silly bug whereby Naga assumes that all depth textures are
-/// `sampler2DShadow` and will cheerfully generate invalid GLSL that tries to
-/// perform non-percentage-closer-filtering with such a sampler. Therefore we
-/// disable depth of field and screen space reflections entirely on WebGL 2.
-#[cfg(any(feature = "webgpu", not(target_arch = "wasm32")))]
-pub const DEPTH_TEXTURE_SAMPLING_SUPPORTED: bool = true;
-
-use core::{f32, ops::Range};
-
 use bevy_camera::{Camera, Camera3d, Camera3dDepthLoadOp};
 use bevy_diagnostic::FrameCount;
 use bevy_render::{
     batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
     camera::CameraRenderGraph,
-    mesh::allocator::MeshSlabs,
     occlusion_culling::OcclusionCulling,
-    render_phase::{PhaseItemBatchSetKey, ViewRangefinder3d},
     texture::CachedTexture,
     view::{prepare_view_targets, NoIndirectDrawing, RetainedViewEntity},
 };
-use indexmap::IndexMap;
 pub use main_opaque_pass_3d_node::*;
 pub use main_transparent_pass_3d_node::*;
 
 use bevy_app::{App, Plugin, PostUpdate};
-use bevy_asset::UntypedAssetId;
 use bevy_color::LinearRgba;
-use bevy_ecs::{entity::EntityHash, prelude::*};
+use bevy_ecs::prelude::*;
 use bevy_image::ToExtents;
 use bevy_log::warn;
-use bevy_math::{FloatOrd, Vec3};
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_render::{
     camera::ExtractedCamera,
     extract_component::ExtractComponentPlugin,
     prelude::Msaa,
     render_phase::{
-        sort_phase_system, BinnedPhaseItem, CachedRenderPipelinePhaseItem, DrawFunctionId,
-        DrawFunctions, PhaseItem, PhaseItemExtraIndex, SortedPhaseItem, ViewBinnedRenderPhases,
-        ViewSortedRenderPhases,
+        sort_phase_system, DrawFunctions, ViewBinnedRenderPhases, ViewSortedRenderPhases,
     },
-    render_resource::{
-        CachedRenderPipelineId, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    },
+    render_resource::{TextureDescriptor, TextureDimension, TextureUsages},
     renderer::RenderDevice,
-    sync_world::{MainEntity, RenderEntity},
+    sync_world::RenderEntity,
     texture::{ColorAttachment, TextureCache},
     view::{ExtractedView, ViewDepthTexture},
     Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
 };
-use nonmax::NonMaxU32;
 
 use crate::deferred::copy_lighting_id::copy_deferred_lighting_id;
 use crate::deferred::node::{early_deferred_prepass, late_deferred_prepass};
@@ -82,13 +47,16 @@ use crate::{
     prepass::{
         AlphaMask3dPrepass, DeferredPrepass, DeferredPrepassDoubleBuffer, DepthPrepass,
         DepthPrepassDoubleBuffer, MotionVectorPrepass, NormalPrepass, Opaque3dPrepass,
-        OpaqueNoLightmap3dBatchSetKey, OpaqueNoLightmap3dBinKey, ViewPrepassTextures,
-        MOTION_VECTOR_PREPASS_FORMAT, NORMAL_PREPASS_FORMAT,
+        ViewPrepassTextures, MOTION_VECTOR_PREPASS_FORMAT, NORMAL_PREPASS_FORMAT,
     },
     schedule::Core3d,
     skybox::SkyboxPlugin,
     tonemapping::{DebandDither, Tonemapping},
     Core3dSystems,
+};
+
+pub use bevy_core_pipeline_types::core_3d::{
+    AlphaMask3d, Opaque3d, Transparent3d, CORE_3D_DEPTH_FORMAT, DEPTH_TEXTURE_SAMPLING_SUPPORTED,
 };
 
 pub struct Core3dPlugin;
@@ -155,335 +123,6 @@ impl Plugin for Core3dPlugin {
                     upscaling.after(Core3dSystems::PostProcess),
                 ),
             );
-    }
-}
-
-/// Opaque 3D [`BinnedPhaseItem`]s.
-pub struct Opaque3d {
-    /// Determines which objects can be placed into a *batch set*.
-    ///
-    /// Objects in a single batch set can potentially be multi-drawn together,
-    /// if it's enabled and the current platform supports it.
-    pub batch_set_key: Opaque3dBatchSetKey,
-    /// The key, which determines which can be batched.
-    pub bin_key: Opaque3dBinKey,
-    /// An entity from which data will be fetched, including the mesh if
-    /// applicable.
-    pub representative_entity: (Entity, MainEntity),
-    /// The ranges of instances.
-    pub batch_range: Range<u32>,
-    /// An extra index, which is either a dynamic offset or an index in the
-    /// indirect parameters list.
-    pub extra_index: PhaseItemExtraIndex,
-}
-
-/// Information that must be identical in order to place opaque meshes in the
-/// same *batch set*.
-///
-/// A batch set is a set of batches that can be multi-drawn together, if
-/// multi-draw is in use.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Opaque3dBatchSetKey {
-    /// The identifier of the render pipeline.
-    pub pipeline: CachedRenderPipelineId,
-
-    /// The function used to draw.
-    pub draw_function: DrawFunctionId,
-
-    /// The ID of a bind group specific to the material instance.
-    ///
-    /// In the case of PBR, this is the `MaterialBindGroupIndex`.
-    pub material_bind_group_index: Option<u32>,
-
-    /// The IDs of the slabs of GPU memory in the mesh allocator that contain
-    /// the mesh data.
-    ///
-    /// For non-mesh items, you can fill the [`MeshSlabs::vertex_slab_id`] with
-    /// 0 if your items can be multi-drawn, or with a unique value if they
-    /// can't.
-    pub slabs: MeshSlabs,
-
-    /// Index of the slab that the lightmap resides in, if a lightmap is
-    /// present.
-    pub lightmap_slab: Option<NonMaxU32>,
-}
-
-impl PhaseItemBatchSetKey for Opaque3dBatchSetKey {
-    fn indexed(&self) -> bool {
-        self.slabs.index_slab_id.is_some()
-    }
-}
-
-/// Data that must be identical in order to *batch* phase items together.
-///
-/// Note that a *batch set* (if multi-draw is in use) contains multiple batches.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Opaque3dBinKey {
-    /// The asset that this phase item is associated with.
-    ///
-    /// Normally, this is the ID of the mesh, but for non-mesh items it might be
-    /// the ID of another type of asset.
-    pub asset_id: UntypedAssetId,
-}
-
-impl PhaseItem for Opaque3d {
-    #[inline]
-    fn entity(&self) -> Entity {
-        self.representative_entity.0
-    }
-
-    #[inline]
-    fn main_entity(&self) -> MainEntity {
-        self.representative_entity.1
-    }
-
-    #[inline]
-    fn draw_function(&self) -> DrawFunctionId {
-        self.batch_set_key.draw_function
-    }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    fn extra_index(&self) -> PhaseItemExtraIndex {
-        self.extra_index.clone()
-    }
-
-    fn batch_range_and_extra_index_mut(&mut self) -> (&mut Range<u32>, &mut PhaseItemExtraIndex) {
-        (&mut self.batch_range, &mut self.extra_index)
-    }
-}
-
-impl BinnedPhaseItem for Opaque3d {
-    type BatchSetKey = Opaque3dBatchSetKey;
-    type BinKey = Opaque3dBinKey;
-
-    #[inline]
-    fn new(
-        batch_set_key: Self::BatchSetKey,
-        bin_key: Self::BinKey,
-        representative_entity: (Entity, MainEntity),
-        batch_range: Range<u32>,
-        extra_index: PhaseItemExtraIndex,
-    ) -> Self {
-        Opaque3d {
-            batch_set_key,
-            bin_key,
-            representative_entity,
-            batch_range,
-            extra_index,
-        }
-    }
-}
-
-impl CachedRenderPipelinePhaseItem for Opaque3d {
-    #[inline]
-    fn cached_pipeline(&self) -> CachedRenderPipelineId {
-        self.batch_set_key.pipeline
-    }
-}
-
-pub struct AlphaMask3d {
-    /// Determines which objects can be placed into a *batch set*.
-    ///
-    /// Objects in a single batch set can potentially be multi-drawn together,
-    /// if it's enabled and the current platform supports it.
-    pub batch_set_key: OpaqueNoLightmap3dBatchSetKey,
-    /// The key, which determines which can be batched.
-    pub bin_key: OpaqueNoLightmap3dBinKey,
-    pub representative_entity: (Entity, MainEntity),
-    pub batch_range: Range<u32>,
-    pub extra_index: PhaseItemExtraIndex,
-}
-
-impl PhaseItem for AlphaMask3d {
-    #[inline]
-    fn entity(&self) -> Entity {
-        self.representative_entity.0
-    }
-
-    fn main_entity(&self) -> MainEntity {
-        self.representative_entity.1
-    }
-
-    #[inline]
-    fn draw_function(&self) -> DrawFunctionId {
-        self.batch_set_key.draw_function
-    }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    #[inline]
-    fn extra_index(&self) -> PhaseItemExtraIndex {
-        self.extra_index.clone()
-    }
-
-    #[inline]
-    fn batch_range_and_extra_index_mut(&mut self) -> (&mut Range<u32>, &mut PhaseItemExtraIndex) {
-        (&mut self.batch_range, &mut self.extra_index)
-    }
-}
-
-impl BinnedPhaseItem for AlphaMask3d {
-    type BinKey = OpaqueNoLightmap3dBinKey;
-    type BatchSetKey = OpaqueNoLightmap3dBatchSetKey;
-
-    #[inline]
-    fn new(
-        batch_set_key: Self::BatchSetKey,
-        bin_key: Self::BinKey,
-        representative_entity: (Entity, MainEntity),
-        batch_range: Range<u32>,
-        extra_index: PhaseItemExtraIndex,
-    ) -> Self {
-        Self {
-            batch_set_key,
-            bin_key,
-            representative_entity,
-            batch_range,
-            extra_index,
-        }
-    }
-}
-
-impl CachedRenderPipelinePhaseItem for AlphaMask3d {
-    #[inline]
-    fn cached_pipeline(&self) -> CachedRenderPipelineId {
-        self.batch_set_key.pipeline
-    }
-}
-
-pub struct Transparent3d {
-    pub sorting_info: TransparentSortingInfo3d,
-    pub distance: f32,
-    pub pipeline: CachedRenderPipelineId,
-    pub entity: (Entity, MainEntity),
-    pub draw_function: DrawFunctionId,
-    pub batch_range: Range<u32>,
-    pub extra_index: PhaseItemExtraIndex,
-    /// Whether the mesh in question is indexed (uses an index buffer in
-    /// addition to its vertex buffer).
-    pub indexed: bool,
-}
-
-impl PhaseItem for Transparent3d {
-    #[inline]
-    fn entity(&self) -> Entity {
-        self.entity.0
-    }
-
-    fn main_entity(&self) -> MainEntity {
-        self.entity.1
-    }
-
-    #[inline]
-    fn draw_function(&self) -> DrawFunctionId {
-        self.draw_function
-    }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    #[inline]
-    fn extra_index(&self) -> PhaseItemExtraIndex {
-        self.extra_index.clone()
-    }
-
-    #[inline]
-    fn batch_range_and_extra_index_mut(&mut self) -> (&mut Range<u32>, &mut PhaseItemExtraIndex) {
-        (&mut self.batch_range, &mut self.extra_index)
-    }
-}
-
-impl SortedPhaseItem for Transparent3d {
-    // NOTE: Values increase towards the camera. Back-to-front ordering for transparent means we need an ascending sort.
-    type SortKey = FloatOrd;
-
-    #[inline]
-    fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
-    }
-
-    #[inline]
-    fn sort(items: &mut IndexMap<(Entity, MainEntity), Transparent3d, EntityHash>) {
-        items.sort_by_key(|_, item| item.sort_key());
-    }
-
-    fn recalculate_sort_keys(
-        items: &mut IndexMap<(Entity, MainEntity), Self, EntityHash>,
-        view: &ExtractedView,
-    ) {
-        // Determine the distance to the view for each phase item.
-        let rangefinder = view.rangefinder3d();
-        for item in items.values_mut() {
-            item.distance = item.sorting_info.sort_distance(&rangefinder);
-        }
-    }
-
-    #[inline]
-    fn indexed(&self) -> bool {
-        self.indexed
-    }
-}
-
-impl CachedRenderPipelinePhaseItem for Transparent3d {
-    #[inline]
-    fn cached_pipeline(&self) -> CachedRenderPipelineId {
-        self.pipeline
-    }
-}
-
-/// Information needed to perform a depth sort.
-#[derive(Clone, Copy)]
-pub enum TransparentSortingInfo3d {
-    /// No information is needed because this object should always appear on top
-    /// of other objects.
-    AlwaysOnTop,
-    /// Information needed to sort the object based on distance to the view.
-    Sorted {
-        /// The center of the mesh.
-        ///
-        /// This is the point that is used to sort.
-        mesh_center: Vec3,
-        /// An additional value that's artificially added to the distance before
-        /// sorting.
-        depth_bias: f32,
-    },
-}
-
-impl TransparentSortingInfo3d {
-    /// Calculates the value used for distance sorting for an item.
-    /// For [`Self::AlwaysOnTop`], this is [`f32::NEG_INFINITY`].
-    pub fn sort_distance(&self, rangefinder: &ViewRangefinder3d) -> f32 {
-        match *self {
-            TransparentSortingInfo3d::AlwaysOnTop => f32::NEG_INFINITY,
-            TransparentSortingInfo3d::Sorted {
-                mesh_center,
-                depth_bias,
-            } => rangefinder.distance(&mesh_center) + depth_bias,
-        }
     }
 }
 

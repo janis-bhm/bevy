@@ -138,10 +138,7 @@ pub fn init_copy_deferred_lighting_id_pipeline(
     });
 }
 
-#[derive(Component)]
-pub struct DeferredLightingIdDepthTexture {
-    pub texture: CachedTexture,
-}
+pub use bevy_core_pipeline_types::deferred::copy_lighting_id::DeferredLightingIdDepthTexture;
 
 fn prepare_deferred_lighting_id_textures(
     mut commands: Commands,

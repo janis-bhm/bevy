@@ -31,7 +31,7 @@ use bevy_ecs::{
 };
 use bevy_image::Image;
 use bevy_log::error;
-use bevy_math::{vec2, Vec2};
+use bevy_math::vec2;
 use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
 use bevy_render::{
     diagnostic::RecordDiagnostics as _,
@@ -41,10 +41,9 @@ use bevy_render::{
         BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
         CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, Extent3d,
         FilterMode, MipmapFilterMode, PipelineCache, Sampler, SamplerBindingType,
-        SamplerDescriptor, ShaderStages, ShaderType, SpecializedComputePipelines,
-        StorageTextureAccess, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat,
-        TextureFormatFeatureFlags, TextureUsages, TextureView, TextureViewDescriptor,
-        TextureViewDimension, UniformBuffer,
+        SamplerDescriptor, ShaderStages, SpecializedComputePipelines, StorageTextureAccess,
+        TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        TextureView, TextureViewDescriptor, TextureViewDimension, UniformBuffer,
     },
     renderer::{RenderAdapter, RenderContext, RenderDevice, RenderQueue},
     settings::WgpuFeatures,
@@ -57,22 +56,9 @@ use bevy_utils::default;
 
 pub mod experimental;
 
-/// A resource that stores the shaders that perform downsampling.
-#[derive(Clone, Resource)]
-pub struct DownsampleShaders {
-    /// The experimental shader that downsamples depth
-    /// (`downsample_depth.wgsl`).
-    pub depth: Handle<Shader>,
-    /// The shaders that perform downsampling of color textures.
-    ///
-    /// This table maps a [`TextureFormat`] to the shader that performs
-    /// downsampling for textures in that format.
-    pub general: HashMap<TextureFormat, Handle<Shader>>,
-}
-
-// The number of storage textures required to combine the bind groups in the
-// downsampling shader.
-const REQUIRED_STORAGE_TEXTURES: u32 = 12;
+pub use bevy_core_pipeline_types::mip_generation::{
+    can_combine_downsampling_bind_groups, DownsampleShaders, DownsamplingConstants,
+};
 
 /// All texture formats that we can perform downsampling for.
 ///
@@ -227,22 +213,6 @@ struct MipGenerationJobBindGroups {
     downsampling_bind_group_pass_1: BindGroup,
     /// The bind group for the second downsampling compute pass.
     downsampling_bind_group_pass_2: BindGroup,
-}
-
-/// Constants for the single-pass downsampling shader generated on the CPU and
-/// read on the GPU.
-///
-/// These constants are stored within a uniform buffer. There's one such uniform
-/// buffer per image.
-#[derive(Clone, Copy, ShaderType)]
-#[repr(C)]
-pub struct DownsamplingConstants {
-    /// The number of mip levels that this image possesses.
-    pub mips: u32,
-    /// The reciprocal of the size of the first mipmap level for this texture.
-    pub inverse_input_size: Vec2,
-    /// Padding.
-    pub _padding: u32,
 }
 
 /// A plugin that allows Bevy to repeatedly downsample textures to create
@@ -932,26 +902,4 @@ fn get_mip_storage_view(
 /// for a new frame.
 fn reset_mip_generation_jobs(mut mip_generation_jobs: ResMut<MipGenerationJobs>) {
     mip_generation_jobs.clear();
-}
-
-/// Returns true if the current platform can use a single bind group for
-/// single-pass downsampling.
-///
-/// If this platform must use two separate bind groups, one for each pass, this
-/// function returns false.
-pub fn can_combine_downsampling_bind_groups(
-    render_adapter: &RenderAdapter,
-    render_device: &RenderDevice,
-) -> bool {
-    // Determine whether we can use a single, large bind group for all mip outputs
-    let storage_texture_limit = render_device.limits().max_storage_textures_per_shader_stage;
-
-    // Determine whether we can read and write to the same rgba16f storage texture
-    let read_write_support = render_adapter
-        .get_texture_format_features(TextureFormat::Rgba16Float)
-        .flags
-        .contains(TextureFormatFeatureFlags::STORAGE_READ_WRITE);
-
-    // Combine the bind group and use read-write storage if it is supported
-    storage_texture_limit >= REQUIRED_STORAGE_TEXTURES && read_write_support
 }

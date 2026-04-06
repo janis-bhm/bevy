@@ -2,17 +2,15 @@
 
 use bevy_app::prelude::*;
 use bevy_camera::Camera3d;
-use bevy_ecs::{component::*, prelude::*};
+use bevy_ecs::prelude::*;
 use bevy_log::trace;
 use bevy_math::UVec2;
 use bevy_platform::time::Instant;
-use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use bevy_render::{
     camera::ExtractedCamera,
-    extract_component::{ExtractComponent, ExtractComponentPlugin},
+    extract_component::ExtractComponentPlugin,
     render_resource::{
-        BufferUsages, DynamicUniformBuffer, ShaderType, TextureUsages, UniformBuffer,
-        UninitBufferVec,
+        BufferUsages, DynamicUniformBuffer, TextureUsages, UniformBuffer, UninitBufferVec,
     },
     renderer::{RenderDevice, RenderQueue},
     view::Msaa,
@@ -23,45 +21,17 @@ use resolve::OitResolvePlugin;
 
 use crate::{
     core_3d::main_transparent_pass_3d,
-    oit::resolve::{node::oit_resolve, OitResolvePipelineId},
+    oit::resolve::node::oit_resolve,
     schedule::{Core3d, Core3dSystems},
+};
+
+pub use bevy_core_pipeline_types::oit::{
+    OitBuffers, OitFragmentNode, OrderIndependentTransparencySettings,
+    OrderIndependentTransparencySettingsOffset,
 };
 
 /// Module that defines the necessary systems to resolve the OIT buffer and render it to the screen.
 pub mod resolve;
-
-/// Used to identify which camera will use OIT to render transparent meshes
-/// and to configure OIT.
-// TODO consider supporting multiple OIT techniques like WBOIT, Moment Based OIT,
-// depth peeling, stochastic transparency, ray tracing etc.
-// This should probably be done by adding an enum to this component.
-// We use the same struct to pass on the settings to the drawing shader.
-#[derive(Clone, Copy, ExtractComponent, Reflect, ShaderType, Component)]
-#[extract_component_sync_target((Self, OrderIndependentTransparencySettingsOffset, OitResolvePipelineId))]
-#[reflect(Clone, Default)]
-pub struct OrderIndependentTransparencySettings {
-    /// Controls how many fragments will be exactly sorted.
-    /// If the scene has more fragments than this, they will be merged approximately.
-    /// More sorted fragments is more accurate but will be slower.
-    pub sorted_fragment_max_count: u32,
-    /// The average fragments per pixel stored in the buffer. This should be bigger enough otherwise the fragments will be discarded.
-    /// Higher values increase memory usage.
-    pub fragments_per_pixel_average: f32,
-    /// Threshold for which fragments will be added to the blending layers.
-    /// This can be tweaked to optimize quality / layers count. Higher values will
-    /// allow lower number of layers and a better performance, compromising quality.
-    pub alpha_threshold: f32,
-}
-
-impl Default for OrderIndependentTransparencySettings {
-    fn default() -> Self {
-        Self {
-            sorted_fragment_max_count: 8,
-            fragments_per_pixel_average: 4.0,
-            alpha_threshold: 0.0,
-        }
-    }
-}
 
 /// A plugin that adds support for Order Independent Transparency (OIT).
 /// This can correctly render some scenes that would otherwise have artifacts due to alpha blending, but uses more memory.
@@ -138,45 +108,21 @@ fn check_msaa(cameras: Query<&Msaa, With<OrderIndependentTransparencySettings>>)
     }
 }
 
-#[derive(Clone, Copy, ShaderType)]
-pub struct OitFragmentNode {
-    pub color: u32,
-    pub depth_alpha: u32,
-    pub next: u32,
+fn create_nodes_buffer(
+    size: usize,
+    render_device: &RenderDevice,
+) -> UninitBufferVec<OitFragmentNode> {
+    let mut nodes = UninitBufferVec::new(BufferUsages::COPY_DST | BufferUsages::STORAGE);
+    nodes.set_label(Some("oit_nodes"));
+    nodes.reserve(size, render_device);
+    nodes
 }
 
-/// Holds the buffers that contain the data of all OIT layers.
-/// We use one big buffer for the entire app. Each camera will reuse it so it will
-/// always be the size of the biggest OIT enabled camera.
-#[derive(Resource)]
-pub struct OitBuffers {
-    pub settings: DynamicUniformBuffer<OrderIndependentTransparencySettings>,
-    pub nodes_capacity: UniformBuffer<u32>,
-    /// OIT nodes buffer contains color, depth and linked next node for each fragments.
-    pub nodes: UninitBufferVec<OitFragmentNode>,
-    /// OIT heads buffer contains the head that pointers nodes buffer, essentially used as a 2d array where xy is the screen coordinate.
-    /// We don't use storage texture as it requires native only [`bevy_render::settings::WgpuFeatures::TEXTURE_ATOMIC`].
-    pub heads: UninitBufferVec<u32>,
-    pub atomic_counter: UninitBufferVec<u32>,
-}
-
-impl OitBuffers {
-    fn create_nodes_buffer(
-        size: usize,
-        render_device: &RenderDevice,
-    ) -> UninitBufferVec<OitFragmentNode> {
-        let mut nodes = UninitBufferVec::new(BufferUsages::COPY_DST | BufferUsages::STORAGE);
-        nodes.set_label(Some("oit_nodes"));
-        nodes.reserve(size, render_device);
-        nodes
-    }
-
-    fn create_heads_buffer(size: usize, render_device: &RenderDevice) -> UninitBufferVec<u32> {
-        let mut nodes = UninitBufferVec::new(BufferUsages::COPY_DST | BufferUsages::STORAGE);
-        nodes.set_label(Some("oit_heads"));
-        nodes.reserve(size, render_device);
-        nodes
-    }
+fn create_heads_buffer(size: usize, render_device: &RenderDevice) -> UninitBufferVec<u32> {
+    let mut nodes = UninitBufferVec::new(BufferUsages::COPY_DST | BufferUsages::STORAGE);
+    nodes.set_label(Some("oit_heads"));
+    nodes.reserve(size, render_device);
+    nodes
 }
 
 pub fn init_oit_buffers(
@@ -191,9 +137,9 @@ pub fn init_oit_buffers(
     nodes_capacity.set(1);
     nodes_capacity.write_buffer(&render_device, &render_queue);
 
-    let nodes = OitBuffers::create_nodes_buffer(1, &render_device);
+    let nodes = create_nodes_buffer(1, &render_device);
 
-    let heads = OitBuffers::create_heads_buffer(1, &render_device);
+    let heads = create_heads_buffer(1, &render_device);
 
     let mut atomic_counter = UninitBufferVec::new(BufferUsages::COPY_DST | BufferUsages::STORAGE);
     atomic_counter.set_label(Some("oit_atomic_counter"));
@@ -209,11 +155,6 @@ pub fn init_oit_buffers(
         atomic_counter,
         settings,
     });
-}
-
-#[derive(Component)]
-pub struct OrderIndependentTransparencySettingsOffset {
-    pub offset: u32,
 }
 
 /// This creates or resizes the oit buffers for each camera.

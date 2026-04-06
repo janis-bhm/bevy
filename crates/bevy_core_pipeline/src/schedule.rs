@@ -10,10 +10,7 @@
 //! and executing their associated schedules. In this way, the schedule for each camera is a
 //! sub-schedule or sub-graph of the root render graph schedule.
 use bevy_camera::{ClearColor, NormalizedRenderTarget};
-use bevy_ecs::{
-    prelude::*,
-    schedule::{IntoScheduleConfigs, Schedule, ScheduleLabel, SystemSet},
-};
+use bevy_ecs::prelude::*;
 use bevy_log::info_span;
 use bevy_platform::collections::HashSet;
 use bevy_render::{
@@ -26,83 +23,7 @@ use bevy_render::{
     view::ExtractedWindows,
 };
 
-/// Schedule label for the Core 3D rendering pipeline.
-#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Core3d;
-
-/// System sets for the Core 3D rendering pipeline, defining the main stages of rendering.
-/// These stages include and run in the following order:
-/// - `Prepass`: Initial rendering operations, such as depth pre-pass.
-/// - `MainPass`: The primary rendering operations, including drawing opaque and transparent objects.
-/// - `EarlyPostProcess`: Initial post processing effects.
-/// - `PostProcess`: Final rendering operations, such as post-processing effects.
-///
-/// Additional systems can be added to these sets to customize the rendering pipeline, or additional
-/// sets can be created relative to these core sets.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Core3dSystems {
-    Prepass,
-    MainPass,
-    EarlyPostProcess,
-    PostProcess,
-}
-
-impl Core3d {
-    pub fn base_schedule() -> Schedule {
-        use bevy_ecs::schedule::ScheduleBuildSettings;
-        use Core3dSystems::*;
-
-        let mut schedule = Schedule::new(Self);
-
-        schedule.set_build_settings(ScheduleBuildSettings {
-            auto_insert_apply_deferred: false,
-            ..Default::default()
-        });
-
-        schedule.configure_sets((Prepass, MainPass, EarlyPostProcess, PostProcess).chain());
-
-        schedule
-    }
-}
-
-/// Schedule label for the Core 2D rendering pipeline.
-#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Core2d;
-
-/// System sets for the Core 2D rendering pipeline, defining the main stages of rendering.
-/// These stages include and run in the following order:
-/// - `Prepass`: Initial rendering operations, such as depth pre-pass.
-/// - `MainPass`: The primary rendering operations, including drawing 2D sprites and meshes.
-/// - `EarlyPostProcess`: Initial post processing effects.
-/// - `PostProcess`: Final rendering operations, such as post-processing effects.
-///
-/// Additional systems can be added to these sets to customize the rendering pipeline, or additional
-/// sets can be created relative to these core sets.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Core2dSystems {
-    Prepass,
-    MainPass,
-    EarlyPostProcess,
-    PostProcess,
-}
-
-impl Core2d {
-    pub fn base_schedule() -> Schedule {
-        use bevy_ecs::schedule::ScheduleBuildSettings;
-        use Core2dSystems::*;
-
-        let mut schedule = Schedule::new(Self);
-
-        schedule.set_build_settings(ScheduleBuildSettings {
-            auto_insert_apply_deferred: false,
-            ..Default::default()
-        });
-
-        schedule.configure_sets((Prepass, MainPass, EarlyPostProcess, PostProcess).chain());
-
-        schedule
-    }
-}
+pub use bevy_core_pipeline_types::schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems};
 
 /// Holds the entity of windows that are a render target for a camera
 #[derive(Resource)]

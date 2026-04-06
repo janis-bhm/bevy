@@ -31,12 +31,9 @@
 //! [SMAA]: https://www.iryoku.com/smaa/
 use bevy_app::{App, Plugin};
 use bevy_asset::{embedded_asset, load_embedded_asset, AssetServer, Handle};
+use bevy_core_pipeline::schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems};
 #[cfg(not(feature = "smaa_luts"))]
 use bevy_core_pipeline::tonemapping::lut_placeholder;
-use bevy_core_pipeline::{
-    schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems},
-    tonemapping::tonemapping,
-};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     component::Component,
@@ -352,11 +349,13 @@ impl Plugin for SmaaPlugin {
             )
             .add_systems(
                 Core3d,
-                smaa.after(tonemapping).in_set(Core3dSystems::PostProcess),
+                smaa.after(Core3dSystems::Tonemapping)
+                    .in_set(Core3dSystems::PostProcess),
             )
             .add_systems(
                 Core2d,
-                smaa.after(tonemapping).in_set(Core2dSystems::PostProcess),
+                smaa.after(Core2dSystems::Tonemapping)
+                    .in_set(Core2dSystems::PostProcess),
             );
     }
 }

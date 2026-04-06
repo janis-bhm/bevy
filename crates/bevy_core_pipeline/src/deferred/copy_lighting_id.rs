@@ -11,7 +11,7 @@ use bevy_render::{
     diagnostic::RecordDiagnostics,
     render_resource::{binding_types::texture_2d, *},
     renderer::RenderDevice,
-    texture::{CachedTexture, TextureCache},
+    texture::TextureCache,
     view::ViewTarget,
     Render, RenderApp, RenderStartup, RenderSystems,
 };

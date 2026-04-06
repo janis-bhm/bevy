@@ -4,10 +4,7 @@ mod texture;
 
 use bevy_app::{App, Plugin};
 use bevy_camera::Camera3d;
-use bevy_core_pipeline::{
-    core_3d::{main_opaque_pass_3d, main_transparent_pass_3d},
-    schedule::{Core3d, Core3dSystems},
-};
+use bevy_core_pipeline::schedule::{Core3d, Core3dSystems};
 use bevy_ecs::{prelude::*, schedule::IntoScheduleConfigs};
 use bevy_reflect::prelude::*;
 use bevy_render::{
@@ -54,8 +51,8 @@ impl Plugin for ScreenSpaceTransmissionPlugin {
             .add_systems(
                 Core3d,
                 main_transmissive_pass_3d
-                    .after(main_opaque_pass_3d)
-                    .before(main_transparent_pass_3d)
+                    .after(Core3dSystems::MainOpaquePass)
+                    .before(Core3dSystems::MainTransparentPass)
                     .in_set(Core3dSystems::MainPass),
             );
     }

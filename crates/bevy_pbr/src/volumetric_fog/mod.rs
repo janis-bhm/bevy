@@ -31,10 +31,7 @@
 
 use bevy_app::{App, Plugin};
 use bevy_asset::{embedded_asset, Assets, Handle};
-use bevy_core_pipeline::{
-    core_3d::prepare_core_3d_depth_textures,
-    schedule::{Core3d, Core3dSystems},
-};
+use bevy_core_pipeline::schedule::{Core3d, Core3dSystems, PrepareCore3dDepthTextures};
 use bevy_ecs::{resource::Resource, schedule::IntoScheduleConfigs as _};
 use bevy_light::FogVolume;
 use bevy_math::{
@@ -95,7 +92,7 @@ impl Plugin for VolumetricFogPlugin {
                     render::prepare_volumetric_fog_uniforms.in_set(RenderSystems::Prepare),
                     render::prepare_view_depth_textures_for_volumetric_fog
                         .in_set(RenderSystems::Prepare)
-                        .before(prepare_core_3d_depth_textures),
+                        .before(PrepareCore3dDepthTextures),
                 ),
             )
             .add_systems(

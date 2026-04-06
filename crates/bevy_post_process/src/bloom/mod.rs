@@ -12,10 +12,7 @@ use crate::bloom::{
 use bevy_app::{App, Plugin};
 use bevy_asset::embedded_asset;
 use bevy_color::{Gray, LinearRgba};
-use bevy_core_pipeline::{
-    schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems},
-    tonemapping::tonemapping,
-};
+use bevy_core_pipeline::schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems};
 use bevy_ecs::prelude::*;
 use bevy_math::{ops, UVec2};
 use bevy_render::{
@@ -76,11 +73,15 @@ impl Plugin for BloomPlugin {
             )
             .add_systems(
                 Core3d,
-                bloom.before(tonemapping).in_set(Core3dSystems::PostProcess),
+                bloom
+                    .before(Core3dSystems::Tonemapping)
+                    .in_set(Core3dSystems::PostProcess),
             )
             .add_systems(
                 Core2d,
-                bloom.before(tonemapping).in_set(Core2dSystems::PostProcess),
+                bloom
+                    .before(Core2dSystems::Tonemapping)
+                    .in_set(Core2dSystems::PostProcess),
             );
     }
 }

@@ -99,8 +99,7 @@ use crate::gpu::GpuClusteringPlugin;
 use crate::{deferred::DeferredPbrLightingPlugin, gpu::extract_clusters_for_gpu_clustering};
 use bevy_app::prelude::*;
 use bevy_asset::{AssetApp, AssetPath, Assets, Handle, RenderAssetUsages};
-use bevy_core_pipeline::mip_generation::experimental::depth::early_downsample_depth;
-use bevy_core_pipeline::schedule::{Core3d, Core3dSystems};
+use bevy_core_pipeline::schedule::{Core3d, Core3dSystems, EarlyDownsampleDepth};
 use bevy_ecs::prelude::*;
 #[cfg(feature = "bluenoise_texture")]
 use bevy_image::{CompressedImageFormats, ImageType};
@@ -344,7 +343,7 @@ impl Plugin for PbrPlugin {
             (
                 shadow_pass::<EARLY_SHADOW_PASS>
                     .after(early_prepass_build_indirect_parameters)
-                    .before(early_downsample_depth)
+                    .before(EarlyDownsampleDepth)
                     .before(shadow_pass::<LATE_SHADOW_PASS>),
                 shadow_pass::<LATE_SHADOW_PASS>
                     .after(late_prepass_build_indirect_parameters)

@@ -2,6 +2,7 @@
 
 use bevy_app::prelude::*;
 use bevy_camera::Camera3d;
+use bevy_core_pipeline_types::schedule::PrepareOitBuffers;
 use bevy_ecs::prelude::*;
 use bevy_log::trace;
 use bevy_math::UVec2;
@@ -73,7 +74,9 @@ impl Plugin for OrderIndependentTransparencyPlugin {
                     configure_camera_depth_usages
                         .in_set(RenderSystems::PrepareViews)
                         .ambiguous_with(RenderSystems::PrepareViews),
-                    prepare_oit_buffers.in_set(RenderSystems::PrepareResources),
+                    prepare_oit_buffers
+                        .in_set(PrepareOitBuffers)
+                        .in_set(RenderSystems::PrepareResources),
                 ),
             );
 
@@ -181,8 +184,8 @@ pub fn prepare_oit_buffers(
     if camera_count == 0 {
         if buffers.nodes_capacity.get() > &1 {
             // Release oit buffers if no camera enables OIT.
-            buffers.nodes = OitBuffers::create_nodes_buffer(1, &render_device);
-            buffers.heads = OitBuffers::create_heads_buffer(1, &render_device);
+            buffers.nodes = create_nodes_buffer(1, &render_device);
+            buffers.heads = create_heads_buffer(1, &render_device);
             buffers.nodes_capacity.set(1);
             buffers
                 .nodes_capacity
@@ -207,7 +210,7 @@ pub fn prepare_oit_buffers(
     let heads_size = (max_size.x * max_size.y) as usize;
     if buffers.heads.capacity() != heads_size {
         let start = Instant::now();
-        buffers.heads = OitBuffers::create_heads_buffer(heads_size, &render_device);
+        buffers.heads = create_heads_buffer(heads_size, &render_device);
         trace!(
             "OIT heads buffer updated in {:.01}ms with total size {} MiB",
             start.elapsed().as_millis(),
@@ -219,7 +222,7 @@ pub fn prepare_oit_buffers(
     let nodes_size = ((max_size.x * max_size.y) as f32 * fragments_per_pixel_average) as usize;
     if buffers.nodes.capacity() != nodes_size {
         let start = Instant::now();
-        buffers.nodes = OitBuffers::create_nodes_buffer(nodes_size, &render_device);
+        buffers.nodes = create_nodes_buffer(nodes_size, &render_device);
         trace!(
             "OIT nodes buffer updated in {:.01}ms with total size {} MiB",
             start.elapsed().as_millis(),

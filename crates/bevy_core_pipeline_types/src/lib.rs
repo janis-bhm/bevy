@@ -1,3 +1,4 @@
+#![expect(missing_docs, reason = "Not all docs are written yet, see #3492.")]
 //! This crate contains types related to the core rendering pipelines.
 //! The motivation for this crate is to allow dependents on types within to
 //! start compiling before `bevy_core_pipeline` is ready.
@@ -153,20 +154,47 @@ pub mod schedule {
 
     /// System sets for the Core 3D rendering pipeline, defining the main stages of rendering.
     /// These stages include and run in the following order:
-    /// - `Prepass`: Initial rendering operations, such as depth pre-pass.
-    /// - `MainPass`: The primary rendering operations, including drawing opaque and transparent objects.
+    /// - `Prepass`: Initial rendering operations, such as depth
+    /// pre-pass. `EarlyPrepass`, `LatePrepass` and
+    /// `LateDeferredPrepass` take place during this set.
+    /// - `MainPass`: The primary rendering operations, including drawing opaque
+    /// and transparent objects.
     /// - `EarlyPostProcess`: Initial post processing effects.
-    /// - `PostProcess`: Final rendering operations, such as post-processing effects.
+    /// - `PostProcess`: Final rendering operations, such as post-processing
+    /// effects and including `Tonemapping`.
+    /// - `Upscaling`: The final render is upscaled.
     ///
     /// Additional systems can be added to these sets to customize the rendering pipeline, or additional
     /// sets can be created relative to these core sets.
     #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Core3dSystems {
+        EarlyPrepass,
         Prepass,
+        LatePrepass,
+        LateDeferredPrepass,
+        MainOpaquePass,
+        MainTransparentPass,
         MainPass,
         EarlyPostProcess,
         PostProcess,
+        Tonemapping,
+        Upscaling,
     }
+
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct PrepareCore3dDepthTextures;
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct LateDeferredPrepass;
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct EarlyDownsampleDepth;
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct LateDownsampleDepth;
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct PrepareOitBuffers;
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct EarlyPrepass;
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct LatePrepass;
 
     impl Core3d {
         pub fn base_schedule() -> Schedule {
@@ -205,6 +233,8 @@ pub mod schedule {
         MainPass,
         EarlyPostProcess,
         PostProcess,
+        Tonemapping,
+        Upscaling,
     }
 
     impl Core2d {
@@ -1973,10 +2003,9 @@ pub mod oit {
     use bevy_render::{
         extract_component::ExtractComponent,
         render_resource::{
-            BufferUsages, CachedRenderPipelineId, DynamicUniformBuffer, ShaderType, UniformBuffer,
+            CachedRenderPipelineId, DynamicUniformBuffer, ShaderType, UniformBuffer,
             UninitBufferVec,
         },
-        renderer::RenderDevice,
     };
 
     pub mod resolve {
@@ -2105,70 +2134,32 @@ mod imports {
             CORE_2D_DEPTH_FORMAT,
         },
         core_3d::{
-            // TODO: just add sets for these since they are commonly used sync points:
-            // main_opaque_pass_3d, main_transparent_pass_3d, prepare_core_3d_depth_textures,
-            AlphaMask3d,
-            Opaque3d,
-            Transparent3d,
-            TransparentSortingInfo3d,
-            CORE_3D_DEPTH_FORMAT,
-            // DEPTH_TEXTURE_SAMPLING_SUPPORTED, // (feature-gated)
+            AlphaMask3d, Opaque3d, Transparent3d, TransparentSortingInfo3d, CORE_3D_DEPTH_FORMAT,
+            DEPTH_TEXTURE_SAMPLING_SUPPORTED,
         },
         deferred::{
-            copy_lighting_id::DeferredLightingIdDepthTexture,
-            // TODO: add set
-            // node::late_deferred_prepass,
-            AlphaMask3dDeferred,
-            Opaque3dDeferred,
-            DEFERRED_LIGHTING_PASS_ID_DEPTH_FORMAT,
+            copy_lighting_id::DeferredLightingIdDepthTexture, AlphaMask3dDeferred,
+            Opaque3dDeferred, DEFERRED_LIGHTING_PASS_ID_DEPTH_FORMAT,
         },
         mip_generation::{
             can_combine_downsampling_bind_groups,
-            experimental::depth::{
-                create_depth_pyramid_dummy_texture,
-                // TODO: create sets
-                // early_downsample_depth, late_downsample_depth,
-                ViewDepthPyramid,
-            },
+            experimental::depth::{create_depth_pyramid_dummy_texture, ViewDepthPyramid},
             DownsampleShaders, DownsamplingConstants,
         },
         oit::{
-            // TODO: add set
-            // prepare_oit_buffers,
-            resolve::is_oit_supported,
-            OitBuffers,
-            OrderIndependentTransparencySettings,
+            resolve::is_oit_supported, OitBuffers, OrderIndependentTransparencySettings,
             OrderIndependentTransparencySettingsOffset,
         },
         prepass::{
-            // TODO: add sets
-            // node::{early_prepass, late_prepass},
-            prepass_target_descriptors,
-            AlphaMask3dPrepass,
-            DeferredPrepass,
-            DepthPrepass,
-            MotionVectorPrepass,
-            NormalPrepass,
-            Opaque3dPrepass,
-            OpaqueNoLightmap3dBatchSetKey,
-            OpaqueNoLightmap3dBinKey,
-            PreviousViewData,
-            PreviousViewUniformOffset,
-            PreviousViewUniforms,
-            ViewPrepassTextures,
+            prepass_target_descriptors, AlphaMask3dPrepass, DeferredPrepass, DepthPrepass,
+            MotionVectorPrepass, NormalPrepass, Opaque3dPrepass, OpaqueNoLightmap3dBatchSetKey,
+            OpaqueNoLightmap3dBinKey, PreviousViewData, PreviousViewUniformOffset,
+            PreviousViewUniforms, ViewPrepassTextures,
         },
-        // TODO: add set
-        // upscaling::upscaling,
         schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems},
         tonemapping::{
-            get_lut_bind_group_layout_entries,
-            get_lut_bindings,
-            lut_placeholder,
-            // TODO: create set
-            // tonemapping,
-            DebandDither,
-            Tonemapping,
-            TonemappingLuts,
+            get_lut_bind_group_layout_entries, get_lut_bindings, lut_placeholder, DebandDither,
+            Tonemapping, TonemappingLuts,
         },
         FullscreenShader,
     };

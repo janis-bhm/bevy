@@ -54,7 +54,7 @@ use bevy_app::{App, Plugin};
 use bevy_asset::{embedded_asset, load_embedded_asset, AssetServer, Handle};
 use bevy_camera::Camera;
 use bevy_color::Color;
-use bevy_core_pipeline::{prepass::node::early_prepass, Core3d, Core3dSystems};
+use bevy_core_pipeline::schedule::{Core3d, Core3dSystems};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     component::Component,
@@ -180,7 +180,7 @@ impl Plugin for GpuClusteringPlugin {
             .add_systems(
                 Core3d,
                 cluster_on_gpu
-                    .before(early_prepass)
+                    .before(Core3dSystems::EarlyPrepass)
                     .in_set(Core3dSystems::Prepass)
                     .run_if(gpu_clustering_is_enabled),
             );

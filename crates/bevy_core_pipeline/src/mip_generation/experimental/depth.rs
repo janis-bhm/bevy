@@ -3,8 +3,6 @@
 //! Currently, this module only supports generation of hierarchical Z buffers
 //! for occlusion culling.
 
-use core::array;
-
 use crate::mip_generation::DownsampleShaders;
 
 use bevy_asset::Handle;
@@ -26,13 +24,10 @@ use bevy_render::{
     },
     render_resource::{
         binding_types::{sampler, texture_2d, texture_2d_multisampled, texture_storage_2d},
-        BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutDescriptor,
-        BindGroupLayoutEntries, CachedComputePipelineId, ComputePassDescriptor, ComputePipeline,
-        ComputePipelineDescriptor, Extent3d, IntoBinding, PipelineCache, Sampler,
-        SamplerBindingType, SamplerDescriptor, ShaderStages, SpecializedComputePipeline,
-        SpecializedComputePipelines, StorageTextureAccess, TextureAspect, TextureDescriptor,
-        TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-        TextureViewDescriptor, TextureViewDimension,
+        BindGroup, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedComputePipelineId,
+        ComputePipelineDescriptor, PipelineCache, Sampler, SamplerBindingType, SamplerDescriptor,
+        ShaderStages, SpecializedComputePipeline, SpecializedComputePipelines,
+        StorageTextureAccess, TextureFormat, TextureSampleType, TextureView,
     },
     renderer::{RenderContext, RenderDevice, ViewQuery},
     texture::TextureCache,
@@ -578,10 +573,4 @@ pub fn prepare_downsample_depth_view_bind_groups(
                 ),
             ));
     }
-}
-
-/// Returns the previous power of two of x, or, if x is exactly a power of two,
-/// returns x unchanged.
-fn previous_power_of_two(x: u32) -> u32 {
-    1 << (31 - x.leading_zeros())
 }

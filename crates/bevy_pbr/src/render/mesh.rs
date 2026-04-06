@@ -12,10 +12,11 @@ use bevy_camera::{
     visibility::{NoFrustumCulling, RenderLayers, ViewVisibility, VisibilityRange},
     Camera, Projection,
 };
+use bevy_core_pipeline::schedule::PrepareOitBuffers;
 use bevy_core_pipeline::{
     core_3d::{AlphaMask3d, Opaque3d, Transparent3d, CORE_3D_DEPTH_FORMAT},
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
-    oit::{prepare_oit_buffers, OrderIndependentTransparencySettingsOffset},
+    oit::OrderIndependentTransparencySettingsOffset,
     prepass::MotionVectorPrepass,
 };
 use bevy_derive::{Deref, DerefMut};
@@ -212,7 +213,7 @@ impl Plugin for MeshRenderPlugin {
                         prepare_mesh_bind_groups.in_set(RenderSystems::PrepareBindGroups),
                         prepare_mesh_view_bind_groups
                             .in_set(RenderSystems::PrepareBindGroups)
-                            .after(prepare_oit_buffers)
+                            .after(PrepareOitBuffers)
                             .after(write_atmosphere_buffer),
                         no_gpu_preprocessing::clear_batched_cpu_instance_buffers::<MeshPipeline>
                             .in_set(RenderSystems::Cleanup)

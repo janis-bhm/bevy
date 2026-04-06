@@ -11,13 +11,9 @@ use core::num::{NonZero, NonZeroU64};
 use bevy_app::{App, Plugin};
 use bevy_asset::{embedded_asset, load_embedded_asset, Handle};
 use bevy_core_pipeline::{
-    deferred::node::late_deferred_prepass,
-    mip_generation::experimental::depth::{early_downsample_depth, ViewDepthPyramid},
-    prepass::{
-        node::{early_prepass, late_prepass},
-        DepthPrepass, PreviousViewData, PreviousViewUniformOffset, PreviousViewUniforms,
-    },
-    schedule::{Core3d, Core3dSystems},
+    mip_generation::experimental::depth::ViewDepthPyramid,
+    prepass::{DepthPrepass, PreviousViewData, PreviousViewUniformOffset, PreviousViewUniforms},
+    schedule::{Core3d, Core3dSystems, EarlyDownsampleDepth},
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
@@ -440,7 +436,7 @@ impl Plugin for GpuMeshPreprocessPlugin {
                         )>),
                     )
                         .chain()
-                        .before(early_prepass),
+                        .before(Core3dSystems::EarlyPrepass),
                     (
                         late_gpu_preprocess,
                         late_prepass_build_indirect_parameters.run_if(any_match_filter::<(
@@ -452,8 +448,8 @@ impl Plugin for GpuMeshPreprocessPlugin {
                         )>),
                     )
                         .chain()
-                        .after(early_downsample_depth)
-                        .before(late_prepass),
+                        .after(EarlyDownsampleDepth)
+                        .before(Core3dSystems::LatePrepass),
                     main_build_indirect_parameters
                         .run_if(any_match_filter::<(
                             With<PreprocessBindGroups>,
@@ -461,7 +457,7 @@ impl Plugin for GpuMeshPreprocessPlugin {
                             Without<NoIndirectDrawing>,
                         )>)
                         .after(late_prepass_build_indirect_parameters)
-                        .after(late_deferred_prepass)
+                        .after(Core3dSystems::LateDeferredPrepass)
                         .before(Core3dSystems::MainPass),
                 ),
             );

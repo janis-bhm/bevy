@@ -74,8 +74,12 @@ impl Plugin for Core2dPlugin {
                     (main_opaque_pass_2d, main_transparent_pass_2d)
                         .chain()
                         .in_set(Core2dSystems::MainPass),
-                    tonemapping.in_set(Core2dSystems::PostProcess),
-                    upscaling.after(Core2dSystems::PostProcess),
+                    tonemapping
+                        .in_set(Core2dSystems::Tonemapping)
+                        .in_set(Core2dSystems::PostProcess),
+                    upscaling
+                        .in_set(Core2dSystems::Upscaling)
+                        .after(Core2dSystems::PostProcess),
                 ),
             );
     }

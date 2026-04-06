@@ -21,6 +21,7 @@ use crate::schedule::{Core3d, Core3dSystems};
 
 use bevy_app::{App, Plugin};
 use bevy_asset::{embedded_asset, load_embedded_asset, AssetId, Assets, Handle};
+use bevy_core_pipeline_types::schedule::EarlyDownsampleDepth;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::resource_exists,
@@ -268,7 +269,8 @@ impl Plugin for MipGenerationPlugin {
                 (
                     early_downsample_depth
                         .after(early_deferred_prepass)
-                        .before(late_prepass),
+                        .before(late_prepass)
+                        .in_set(EarlyDownsampleDepth),
                     late_downsample_depth.in_set(Core3dSystems::PostProcess),
                 ),
             )

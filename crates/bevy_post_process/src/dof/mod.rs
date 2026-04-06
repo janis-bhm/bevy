@@ -60,7 +60,8 @@ use tracing::{info, warn};
 
 use crate::bloom::bloom;
 use bevy_core_pipeline::{
-    core_3d::DEPTH_TEXTURE_SAMPLING_SUPPORTED, schedule::Core3d, tonemapping::tonemapping,
+    core_3d::DEPTH_TEXTURE_SAMPLING_SUPPORTED,
+    schedule::{Core3d, Core3dSystems},
     FullscreenShader,
 };
 
@@ -238,7 +239,12 @@ impl Plugin for DepthOfFieldPlugin {
                 Render,
                 prepare_depth_of_field_global_bind_group.in_set(RenderSystems::PrepareBindGroups),
             )
-            .add_systems(Core3d, depth_of_field.after(bloom).before(tonemapping));
+            .add_systems(
+                Core3d,
+                depth_of_field
+                    .after(bloom)
+                    .before(Core3dSystems::Tonemapping),
+            );
     }
 }
 

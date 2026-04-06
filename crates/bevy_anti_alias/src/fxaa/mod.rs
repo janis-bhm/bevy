@@ -3,7 +3,6 @@ use bevy_asset::{embedded_asset, load_embedded_asset, AssetServer, Handle};
 use bevy_camera::Camera;
 use bevy_core_pipeline::{
     schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems},
-    tonemapping::tonemapping,
     FullscreenShader,
 };
 use bevy_ecs::prelude::*;
@@ -101,11 +100,13 @@ impl Plugin for FxaaPlugin {
             )
             .add_systems(
                 Core3d,
-                fxaa.after(tonemapping).in_set(Core3dSystems::PostProcess),
+                fxaa.after(Core3dSystems::Tonemapping)
+                    .in_set(Core3dSystems::PostProcess),
             )
             .add_systems(
                 Core2d,
-                fxaa.after(tonemapping).in_set(Core2dSystems::PostProcess),
+                fxaa.after(Core2dSystems::Tonemapping)
+                    .in_set(Core2dSystems::PostProcess),
             );
     }
 }

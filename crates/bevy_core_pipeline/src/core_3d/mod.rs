@@ -2,6 +2,7 @@ mod main_opaque_pass_3d_node;
 mod main_transparent_pass_3d_node;
 
 use bevy_camera::{Camera, Camera3d, Camera3dDepthLoadOp};
+use bevy_core_pipeline_types::schedule::PrepareCore3dDepthTextures;
 use bevy_diagnostic::FrameCount;
 use bevy_render::{
     batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
@@ -99,7 +100,8 @@ impl Plugin for Core3dPlugin {
                         .after(prepare_view_targets)
                         .in_set(RenderSystems::PrepareViews)
                         .ambiguous_with(RenderSystems::PrepareViews),
-                    prepare_core_3d_depth_textures.in_set(RenderSystems::PrepareResources),
+                    (prepare_core_3d_depth_textures.in_set(PrepareCore3dDepthTextures),)
+                        .in_set(RenderSystems::PrepareResources),
                     prepare_prepass_textures.in_set(RenderSystems::PrepareResources),
                 ),
             )
@@ -108,19 +110,26 @@ impl Plugin for Core3dPlugin {
                 Core3d,
                 (
                     (
-                        early_prepass,
+                        early_prepass.in_set(Core3dSystems::EarlyPrepass),
                         early_deferred_prepass,
-                        late_prepass,
-                        late_deferred_prepass,
+                        late_prepass.in_set(Core3dSystems::LatePrepass),
+                        late_deferred_prepass.in_set(Core3dSystems::LateDeferredPrepass),
                         copy_deferred_lighting_id,
                     )
                         .chain()
                         .in_set(Core3dSystems::Prepass),
-                    (main_opaque_pass_3d, main_transparent_pass_3d)
+                    (
+                        main_opaque_pass_3d.in_set(Core3dSystems::MainOpaquePass),
+                        main_transparent_pass_3d.in_set(Core3dSystems::MainTransparentPass),
+                    )
                         .chain()
                         .in_set(Core3dSystems::MainPass),
-                    tonemapping.in_set(Core3dSystems::PostProcess),
-                    upscaling.after(Core3dSystems::PostProcess),
+                    tonemapping
+                        .in_set(Core3dSystems::Tonemapping)
+                        .in_set(Core3dSystems::PostProcess),
+                    upscaling
+                        .in_set(Core3dSystems::Upscaling)
+                        .after(Core3dSystems::PostProcess),
                 ),
             );
     }

@@ -35,7 +35,6 @@ use bevy_app::prelude::*;
 use bevy_asset::{AssetEvent, AssetId, Assets};
 use bevy_color::{Alpha, ColorToComponents, LinearRgba};
 use bevy_core_pipeline::schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems};
-use bevy_core_pipeline::upscaling::upscaling;
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::SystemParam;
@@ -257,11 +256,15 @@ impl Plugin for UiRenderPlugin {
             )
             .add_systems(
                 Core2d,
-                ui_pass.after(Core2dSystems::PostProcess).before(upscaling),
+                ui_pass
+                    .after(Core2dSystems::PostProcess)
+                    .before(Core2dSystems::Upscaling),
             )
             .add_systems(
                 Core3d,
-                ui_pass.after(Core3dSystems::PostProcess).before(upscaling),
+                ui_pass
+                    .after(Core3dSystems::PostProcess)
+                    .before(Core3dSystems::Upscaling),
             );
 
         app.add_plugins(UiTextureSlicerPlugin);
